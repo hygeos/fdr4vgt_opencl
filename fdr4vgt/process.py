@@ -1,5 +1,5 @@
 #from probav_vito import Level1_probav
-from in_out import Level1, save_nc, create_nc, save_nc_batch
+from in_out import Level1, save_nc, create_nc, save_nc_batch, load_brdf
 import configparser
 import xarray as xa
 from core import interpolate
@@ -21,7 +21,8 @@ import datetime
 import gc
 import sys
 import dask
-from funcs import calculate_monthly_aerosol, config, get_slope_err, read_smac_coefficients
+from funcs import calculate_monthly_aerosol, config, get_slope_err, read_smac_coefficients, build_flag
+from CF_from_json import apply_cf_attributes_from_json, validate_cf_compliance
 
 from smaccl.ISmaccl import ISmaccl
 from smaccl.smaccl import type_coeff, get_smac_coeffs
@@ -101,6 +102,9 @@ def memory_tracker(func):
             
     return wrapper
 
+#def rsme_aod(tau_550, sigma_base, sigma_rel):
+#    return np.maximum(sigma_base, sigma_rel*tau_550)
+
 def Ps(z,p0,T, g=9.801, R=287.058, lam=-0.006):
     T1 = np.log(R*T) - np.log(-R*lam*z+R*T)
 
@@ -143,7 +147,7 @@ def get_iaero(frac_aer_model, lat, frac, config):
         xb = np.stack(xb, axis=0)
         xm = np.stack(xm, axis=0)
         iaero = closest_model(xm, xb)
-        iaero = iaero.reshape(sizes)
+        iaero = iaero.reshape(sizes).astype(np.int32)
 
     return iaero
 
@@ -180,6 +184,7 @@ def read_dem(dem, lat , lon, chunks=None):
 @memory_tracker
 def read_merra(merra_aer, merra_p2, lat_sat, lon_sat, time, chunks):
     aer = xa.open_dataset(merra_aer)
+    print(aer)
     p2 = xa.open_dataset(merra_p2)
     assert((time >= np.min(aer['time'])) and (time <= np.max(aer['time'])))
     assert((time >= np.min(p2['time'])) and (time <= np.max(p2['time'])))
@@ -240,7 +245,7 @@ def calc_error(data):
     for i in range(len(bands)):
 #        tmp = b.split('_')[0]
         err[i] = np.sqrt(data ['UNC_RANDOM'][i]**2 + data['UNC_STRUCTURED'][i]**2 + data['UNC_SYSTEMATIC'][i]**2)
-    data = data.drop_vars(['UNC_RANDOM', 'UNC_STRUCTURED', 'UNC_SYSTEMATIC'])   
+#    data = data.drop_vars(['UNC_RANDOM', 'UNC_STRUCTURED', 'UNC_SYSTEMATIC'])   
 
     data["ERROR"] = (['bands','y','x'], err)
     return data
@@ -268,19 +273,45 @@ def array_to_jax_batched(a, batch_size=1000):
 
     return batch
 
+def compute_urtoc(Jtoa, Utoa, Jh2o, Uh2o,Jo3, Uo3, Jps, Ups, Jt550, Ut550, Urtoc_ens, Urtoc_rtm, u2_0):
+
+    unc_toa = Jtoa*Utoa
+    sum = unc_toa ** 2
+
+    unc_h2o = Jh2o*Uh2o
+    sum += unc_h2o ** 2
+
+    unc_o3 = Jo3*Uo3
+    sum += unc_o3 ** 2
+
+    unc_ps = Jps*Ups
+    sum += unc_ps ** 2
+
+    unc_aot = Jt550*Ut550
+    sum += unc_aot ** 2
+
+    dummy = Urtoc_ens
+    sum += dummy ** 2
+
+    dummy = Urtoc_rtm
+    sum += dummy ** 2
+
+    sum += u2_0 ** 2
+
+    return np.sqrt(sum), (unc_h2o, unc_o3, unc_ps, unc_aot)
+
+
 @memory_tracker
-def process_batched(data, frac_aer_model, ca_, ca_ind, config, batch_size=512):
+def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
     dtype = np.dtype([(k, 'f4') for k in ca_ind.keys()])
     ca2_ = np.ones((ca_.shape[0], ca_.shape[1]), dtype=dtype, order='C')
     for idx, name in enumerate(ca_ind.keys()):
         ca2_[name] = ca_[:,:,idx]
 
     s1, s2 = data['SZA'].shape
-    toc = []
-    jac = []
-    S = ISmaccl(config, frac_aer_model, ca2_, platform='CPU', XBLOCK=batch_size, XGRID=batch_size, breakpoint=False)
+    S = ISmaccl(config_, frac_aer_model, ca2_, platform='CPU', XBLOCK=batch_size, XGRID=batch_size, breakpoint=False)
 
-    out = create_nc(config['output'], (s1,s2), data.attrs['bands'], [], 1.0)
+    out = create_nc(config_['output'], (s1,s2), data.attrs['bands'], [], 1.0)
 
     for iband, i in enumerate(range(0, s1, batch_size)):
         # bandeau + 1 ligne au-dessus et en-dessous pour éviter les effets de bord
@@ -290,26 +321,51 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config, batch_size=512):
         latitude =  data_batch.lat
         longitude = data_batch.lon
         date_time = data_batch["mean-time"]
-        iaer_best = get_iaero(frac_aer_model, latitude.values, [data_batch['SU_FRAC'].values, data_batch['DU_FRAC'].values, data_batch['OC_FRAC'].values, data_batch['SS_FRAC'].values, data_batch['BC_FRAC'].values], config)
+        iaer_best = get_iaero(frac_aer_model, latitude.values, [data_batch['SU_FRAC'].values, data_batch['DU_FRAC'].values, data_batch['OC_FRAC'].values, data_batch['SS_FRAC'].values, data_batch['BC_FRAC'].values], config_)
         iaer_month, mean_totex_month, std_totex_month = calculate_monthly_aerosol(date_time, latitude, longitude)
-        iaero  = np.zeros((config['nmodels']+1, iaer_best.shape[0], iaer_best.shape[1]), dtype=np.int32)
+        iaero  = np.zeros((config_['nmodels']+1, iaer_best.shape[0], iaer_best.shape[1]), dtype=np.int32)
         iaero[0] = iaer_best
         iaero[1:] = iaer_month
         ds_out = S.run(data_batch, iaero)
-        pression = data_batch['SLP'] * config['k_p0']
-        err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values/1013., ca_, ca_ind, iaer_month[0])
+        pression = data_batch['SLP'] * config_['k_p0']
+        slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values/1013., ca_, ca_ind, iaer_month[0])
 
-        if config['debug']:
+        if config_['debug']:
             ds_out['iaero'] = (('y','x'), iaer_best)
+
         # suppression des lignes supplémentaires
         if y_min != 0: y_min = 1
         if y_max != s1 : y_max = - 1
         data_batch = data_batch.isel(y=slice(y_min, y_max))
         ds_out = ds_out.isel(y=slice(y_min, y_max))
-        err = err[:, y_min:y_max, :]
+        slope_err = slope_err[:, y_min:y_max, :]
 
-        ds_out['err_slope'] = (('bands','y', 'x'), err)
-        save_nc_batch(out, data_batch, ds_out, iband, batch_size, config['jacobian'], config['debug'])
+        # gradiant AOD
+        ygrad, xgrad = da.gradient(data_batch['TOTEXTTAU'].data)
+        aod_grad = np.sqrt(ygrad**2 + xgrad**2)
+        ds_out = ds_out.assign({
+            'aod_grad': (('y','x'), aod_grad)
+        })
+        del ygrad
+        del xgrad
+
+        ds_out['slope_err'] = (('bands','y', 'x'), slope_err)
+        flag = build_flag(data_batch, ds_out, config)
+#        ds_out['flag'] = (('y','x'), flag)
+        ds_out['flag'] = flag
+        urtoc_rtm = np.zeros_like(ds_out['UrTOC_ens'].values)
+        ds_out['UrTOC_rtm'] = (('bands', 'y', 'x'), urtoc_rtm) 
+
+        urtoc, unc = compute_urtoc(ds_out['Jrtoa'].values, ds_out['Drtoa'].values, ds_out['Juh2o'].values, ds_out['Duh2o'].values, ds_out['Juo3'].values, ds_out['Duo3'].values, ds_out['Jpre'].values, ds_out['Dpre'].values, ds_out['Jtau550'].values, ds_out['Dtaup'].values, ds_out['UrTOC_ens'].values, urtoc_rtm, config_['u2_0'])
+        ds_out['UrTOC'] = (('bands','y','x'), urtoc)
+        ds_out['unc_h2o'] = (('bands','y','x'), unc[0])
+        ds_out['unc_o3']  = (('bands','y','x'), unc[1])
+        ds_out['unc_ps']  = (('bands','y','x'), unc[2])
+        ds_out['unc_aot'] = (('bands','y','x'), unc[3])
+
+        ds_out = apply_cf_attributes_from_json(ds_out, config_['cf_json_path'])
+        data_batch = apply_cf_attributes_from_json(data_batch, config_['cf_json_path'])
+        save_nc_batch(out, data_batch, ds_out, iband, batch_size, config_['jacobian'], config_['debug'])
 
     return None, None
 
@@ -370,7 +426,11 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     config.set('aerosol_model_fraction', config_['faer'])
     config.set('dem_path', config_['dem'])
     config.set('kept_data_path', config_['kept_data_path'])
-    print("config : ", config)
+    config.set('aotmax', config_['aotmax'])
+    config.set('tocmin', config_['tocmin'])
+    config.set('tocmax', config_['tocmax'])
+    config.set('szamax', config_['szamax'])
+    config.set('aod_max_grad', config_['aod_max_grad'])
     dirname = config_['input']
 
     print("probav_folder : ", dirname)
@@ -378,12 +438,19 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     # read ProbaV data
     data = Level1(dirname, 'probav', chunks=chunks)
     data = calc_error(data)
-    print(data)
+
+    dir_brdf = config_['brdf_dir']
+    date = data['mean-time']
+    k1p, k2p = load_brdf(dir_brdf, date, data['lat'], data['lon'], chunks)
+    print(k1p)
+    data['k1p'] = k1p
+    data['k2p'] = k2p
+    del k1p
+    del k2p
 
     # read DEM
     demfile = config_['dem']
     dem = read_dem(demfile, data['lat'], data['lon'], chunks=chunks)
-    print(dem)
     data['elev'] = dem['elev']
     data['Delev'] = dem['Delev']
     del dem
@@ -405,7 +472,6 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     ca_, ca_ind = read_smac_coefficients(smac_coeffs_file)
 #    ca = get_smac_coeffs(smac_coeffs_file)
 #    ca = transform_ca_to_structured(ca_, ca_ind)
-    print("ca : ", ca_.shape, ca_.dtype)
 
     latitude = data.lat
     longitude = data.lon

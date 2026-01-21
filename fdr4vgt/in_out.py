@@ -1,70 +1,111 @@
 from probav_vito import Level1_probav
 import xarray as xa
-from datetime import datetime
+from datetime import date, datetime
 from netCDF4 import Dataset
+import numpy as np
+from glob import glob
+import dask as dk
+from core import interpolate
+
 
 # Définition des attributs CF standards
-cf_attrs = {
-    'lat': {
-        'standard_name': 'latitude',
-        'long_name': 'Latitude',
-        'units': 'degrees_north',
-    },
-    'lon': {
-        'standard_name': 'longitude',
-        'long_name': 'Longitude',
-        'units': 'degrees_east',
-    },
-    'SZA': {
-        'standard_name': 'solar_zenith_angle',
-        'long_name': 'Solar zenith angle',
-        'units': 'degrees',
-        'valid_min': 0.0,
-        'valid_max': 90.0
-    },
-    'SAA': {
-        'standard_name': 'solar_azimuth_angle',
-        'long_name': 'Solar azimuth angle',
-        'units': 'degrees',
-        'valid_min': 0.0,
-        'valid_max': 360.0
-    },
-    'VZA': {
-        'standard_name': 'sensor_zenith_angle',
-        'long_name': 'Sensor zenith angle',
-        'units': 'degrees',
-        'valid_min': 0.0,
-        'valid_max': 90.0
-    },
-    'VAA': {
-        'standard_name': 'sensor_azimuth_angle',
-        'long_name': 'Sensor azimuth angle',
-        'units': 'degrees',
-        'valid_min': 0.0,
-        'valid_max': 360.0
-    },
-    'VZA_IR': {
-        'standard_name': 'sensor_zenith_angle',
-        'long_name': 'SWIR sensor zenith angle',
-        'units': 'degrees',
-        'valid_min': 0.0,
-        'valid_max': 90.0
-    },
-    'VAA_IR': {
-        'standard_name': 'sensor_azimuth_angle',
-        'long_name': 'SWIR sensor azimuth angle',
-        'units': 'degrees',
-        'valid_min': 0.0,
-        'valid_max': 360.0
-    },
-    'rTOC': {
-        'standard_name': 'top_of_canopy_reflectance',
-        'long_name': 'Top of canopy reflectance',
-        'units': '1',
-        'valid_min': 0.0,
-        'valid_max': 1.0
-    },
-}
+#cf_attrs = {
+#    'lat': {
+#        'standard_name': 'latitude',
+#        'long_name': 'Latitude',
+#        'units': 'degrees_north',
+#    },
+#    'lon': {
+#        'standard_name': 'longitude',
+#        'long_name': 'Longitude',
+#        'units': 'degrees_east',
+#    },
+#    'SZA': {
+#        'standard_name': 'solar_zenith_angle',
+#        'long_name': 'Solar zenith angle',
+#        'units': 'degrees',
+#        'valid_min': 0.0,
+#        'valid_max': 90.0
+#    },
+#    'SAA': {
+#        'standard_name': 'solar_azimuth_angle',
+#        'long_name': 'Solar azimuth angle',
+#        'units': 'degrees',
+#        'valid_min': 0.0,
+#        'valid_max': 360.0
+#    },
+#    'VZA': {
+#        'standard_name': 'sensor_zenith_angle',
+#        'long_name': 'Sensor zenith angle',
+#        'units': 'degrees',
+#        'valid_min': 0.0,
+#        'valid_max': 90.0
+#    },
+#    'VAA': {
+#        'standard_name': 'sensor_azimuth_angle',
+#        'long_name': 'Sensor azimuth angle',
+#        'units': 'degrees',
+#        'valid_min': 0.0,
+#        'valid_max': 360.0
+#    },
+#    'VZA_IR': {
+#        'standard_name': 'sensor_zenith_angle',
+#        'long_name': 'SWIR sensor zenith angle',
+#        'units': 'degrees',
+#        'valid_min': 0.0,
+#        'valid_max': 90.0
+#    },
+#    'VAA_IR': {
+#        'standard_name': 'sensor_azimuth_angle',
+#        'long_name': 'SWIR sensor azimuth angle',
+#        'units': 'degrees',
+#        'valid_min': 0.0,
+#        'valid_max': 360.0
+#    },
+#    'rTOC': {
+#        'standard_name': 'top_of_canopy_reflectance',
+#        'long_name': 'Top of canopy reflectance',
+#        'units': '1',
+#        'valid_min': 0.0,
+#        'valid_max': 1.0
+#    },
+#}
+
+def load_brdf(dirname, date, lat, lon, chunks):
+    '''
+    Load BRDF coefficients for a given date
+    Inputs:
+        dirname : directory containing BRDF files
+        date    : date as a numpy.datetime64 object
+        chunks  : chunk size for dask
+    Outputs:
+        xarray.Dataset containing BRDF coefficients
+    '''
+
+    filename = '{}/*{}*.nc'.format(dirname, np.datetime_as_string(date, unit='D').replace('-',''))
+    #filename = '/mnt/ceph/proj/FDR4VGT/input/brdf/c3s_brdf_20050810000000_X32Y08_AVHRR_NOAA17_V1.0.1.nc'
+    filename = glob(filename)
+
+    if len(filename) != 1:
+#        k1p = dk.array.from_array(np.zeros((lat.shape[0], lat.shape[1]), dtype='float32'), chunks=chunks)
+        k1p = xa.DataArray(np.zeros((lat.shape[0], lat.shape[1]), dtype='float32'), dims=('y','x'))
+        return k1p, k1p
+
+    ds = xa.open_dataset(filename) #, chunks={'y':chunks, 'x':chunks})
+    
+    k012  =    interpolate.interp(ds['K012'], Y=interpolate.Linear(lat), X=interpolate.Linear(lon), ).astype(np.float32)
+    k0 = k012[:, :, :,0]
+    k1 = k012[:, :, :,1]
+    k2 = k012[:, :, :,2]
+    k1p = k1/k0
+    k2p = k2/k0
+    filtre = np.logical_not(np.isfinite(k1p))
+    k1p = k1p.where(filtre, other=0.0)
+    filtre = np.logical_not(np.isfinite(k2p))
+    k2p = k2p.where(filtre, other=0.0)
+
+    return k1p, k2p
+
 
 def Level1(input, sensor, chunks=None):
     '''
@@ -104,75 +145,107 @@ def create_nc(filename, gl_size, bands, attrs, version):
     out.createDimension('width', width)
     out.createDimension('bands', len(bands))
 
-    # Ajouter les attributs globaux
-    out.setncatts({
-        'Conventions': 'CF-1.8',
-        'title': 'PROBA-V Level 1 data',
-        'institution': 'VITO',
-        'source': 'PROBA-V satellite observations',
-        'history': f'Created {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
-        'references': 'https://proba-v.vgt.vito.be/',
-        'bands': ','.join(bands)
-    })
+#    # Ajouter les attributs globaux
+#    out.setncatts({
+#        'Conventions': 'CF-1.8',
+#        'title': 'PROBA-V Level 1 data',
+#        'institution': 'VITO',
+#        'source': 'PROBA-V satellite observations',
+#        'history': f'Created {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+#        'references': 'https://proba-v.vgt.vito.be/',
+#        'bands': ','.join(bands)
+#    })
 
     return out
+
+def attrs_corr(attr):
+    del attr['time_find_index']
+    del attr['time_interp']
+#    for key, values in attr.items():
+#        print('key :',key, type(values))
+#        if isinstance(values, datetime):
+#            attr[key] = values.strftime("%Y-%m-%dT%H:%M:%S")
+#            print("attr :" ,key, attr[key])
+
+    return attr
 
 def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False):  
     '''
     Save a batch of data to a NetCDF file.
     out : pointer to the netCDF4 Dataset
-    ds_in : xarray.Dataset containing input data
+    ds_in : xarray.Dataset containing input datk
     ds_out : xarray.Dataset containing output data
     ''' 
     y_start = iband * band_size
     y_end = min(y_start + band_size, out.dimensions['height'].size)
 
-    list_vars_out = ['rTOC', 'UrTOC', 'ac_process_flag','ac_flag']
-    list_vars_in = {'SM_MAP': 'SM_MAP', 'clm':'clm'}
+#    list_vars_out = ['rTOC', 'UrTOC', 'flag']
+    list_vars_out = {'Rtoc_': 'rTOC', 'Rtoc_uncertainty_': 'UrTOC', 'Quality_flag': 'flag'}
+#    list_vars_in = {'SM_MAP': 'SM_MAP', 'clm':'clm'}
+    list_vars_in = {}
     if error:
-        list_vars_out += ['err_slope', 'Drsurf', 'Jrtoa', 'Juh2o', 'Juo3', 'Jpre']
+        list_vars_out = {**list_vars_out, **{'Jacobian_Rtoc_vs_Rtoa_': 'Jrtoa', 'Jacobian_Rtoc_vs_UO3_': 'Juo3', 'Jacobian_Rtoc_vs_UH2O_': 'Juh2o',
+                                            'Jacobian_Rtoc_vs_Ps_': 'Jpre', 'Jacobian_Rtoc_vs_AOD_': 'Jtau550',
+                                            'uncertainty_from_ozone_': 'unc_o3', 'uncertainty_from_h2o_': 'unc_h2o', 'uncertainty_from_pressure_': 'unc_ps', 'uncertainty_from_aod_': 'unc_aot',
+                                            'uncertainty_from_terrain_':'slope_err','uncertainty_from_RTM_fit_':'UrTOC_rtm', 'uncertainty_from_aerosol_':'UrTOC_ens'} 
+                                              }
+        list_vars_in = {'uncertainty_from_TOA_':'ERROR'}
     if debug:
-        list_vars_in = {**list_vars_in, **{'rTOA': 'TOA','elev':'elev','SLP':'SLP','TOTEXTTAU':'TOTEXTTAU', 'TQV':'TQV', 'TO3':'TO3', 'T10M':'T10M'}}
+        list_vars_out = {**list_vars_out, **{'aerosol_model_index':'iaero'}}
+        list_vars_in = {**list_vars_in, **{'AOD_550_used': 'TOTEXTTAU', 'ozone_column_used': 'TO3', 'water_vapor_column_used': 'TQV', 'surface_pressure_used': 'SLP'}}
+#        list_vars_out += ['Duh2o','Duo3','Drtoa','Dpre','Dtaup']
+
+    # global attributes
+    out.setncatts(ds_out.attrs)
+
 
     for var in ['lat','lon','SZA', 'SAA', 'VZA', 'VAA', 'VZA_IR', 'VAA_IR']:
         if var in ds_in.variables.keys():
             if var not in out.variables.keys():
-                out.createVariable(var, 'f4', ('height','width'), zlib=True, complevel=4)
+                dtype = ds_in[var].dtype
+                out.createVariable(var, dtype, ('height','width'), zlib=True, complevel=4)
                 existing_attrs = ds_in[var].attrs if hasattr(ds_in[var], 'attrs') else {}
-                out[var].setncatts({**cf_attrs[var], **existing_attrs})
+                out[var].setncatts({**existing_attrs})
             out.variables[var][y_start:y_end,:] = ds_in[var].values
 
 #    for iband, band in enumerate(ds_in.attrs['bands']):
-    for var in list_vars_out:
-        print(var, ds_out[var].shape)
-        if var in ds_out.variables.keys():
-            if var not in out.variables.keys():
-                if len(ds_out[var].dims) == 3:
-                    out.createVariable(var, 'f4', ('bands', 'height','width'), zlib=True, complevel=4)
-                elif len(ds_out[var].dims) == 2:
-                    out.createVariable(var, 'f4', ('height','width'), zlib=True, complevel=4)
-                if var in cf_attrs.keys():
-                    existing_attrs = ds_out[var].attrs if hasattr(ds_out[var], 'attrs') else {}
-                    out[var].setncatts({**cf_attrs[var], **existing_attrs})
-            if len(ds_out[var].dims) == 3:
-                out.variables[var][:,y_start:y_end, :] = ds_out[var].values
-            elif len(ds_out[var].dims) == 2:
-                out.variables[var][y_start:y_end, :] = ds_out[var].values
+    for var_out, var_in in list_vars_out.items():
+        if len(ds_out[var_in].dims) == 3:
+            for ib in range(ds_out[var_in].shape[0]):
+                var_out_band = '{}B{}'.format(var_out, ib+1)
+                if var_out_band not in out.variables.keys():
+                    dtype = ds_out[var_in].dtype
+                    out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=4)
+                    existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
+                    out[var_out_band].setncatts({**existing_attrs})
+                out.variables[var_out_band][y_start:y_end, :] = ds_out[var_in][ib, :, :].values
+        elif len(ds_out[var_in].dims) == 2:
+            if var_out not in out.variables.keys():
+                dtype = ds_out[var_in].dtype
+                out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=4)
+                existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
+                out[var_out].setncatts({**existing_attrs})
+            out.variables[var_out][y_start:y_end, :] = ds_out[var_in].values
+
 
     for var_out, var_in in list_vars_in.items():
-        if var_in in ds_in.variables.keys():
-            if var_out not in out.variables.keys():
-                if len(ds_in[var_in].dims) == 3:
-                    out.createVariable(var_out, 'f4', ('bands','height','width'), zlib=True, complevel=4)
-                elif len(ds_in[var_in].dims) == 2:
-                    out.createVariable(var_out, 'f4', ('height','width'), zlib=True, complevel=4)
-                if var_out in cf_attrs.keys():
+        if len(ds_in[var_in].dims) == 3:
+            for ib in range(ds_in[var_in].shape[0]):
+                var_out_band = '{}B{}'.format(var_out, ib+1)
+                if var_out_band not in out.variables.keys():
+                    dtype = ds_in[var_in].dtype
+                    out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=4)
                     existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}
-                    out[var_out].setncatts(existing_attrs)
-            if len(ds_in[var_in].dims) == 3:
-                out.variables[var_out][:,y_start:y_end, :] = ds_in[var_in].values
-            elif len(ds_in[var_in].dims) == 2:
-                out.variables[var_out][y_start:y_end, :] = ds_in[var_in].values
+                    out[var_out_band].setncatts({**existing_attrs})
+                out.variables[var_out_band][y_start:y_end, :] = ds_in[var_in][ib, :, :].values
+        elif len(ds_in[var_in].dims) == 2:
+            if var_out not in out.variables.keys():
+                dtype = ds_in[var_in].dtype
+                out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=4)
+                existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}
+                existing_attrs = attrs_corr(existing_attrs)
+                out[var_out].setncatts({**existing_attrs})
+            out.variables[var_out][y_start:y_end, :] = ds_in[var_in].values
 
 def save_nc(ds, filename):
     '''
@@ -244,14 +317,14 @@ def save_nc(ds, filename):
 #    }
 
     # Ajouter les attributs globaux
-    out.attrs = {
-        'Conventions': 'CF-1.8',
-        'title': 'PROBA-V Level 1 data',
-        'institution': 'VITO',
-        'source': 'PROBA-V satellite observations',
-        'history': f'Created {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
-        'references': 'https://proba-v.vgt.vito.be/',
-    }
+#    out.attrs = {
+#        'Conventions': 'CF-1.8',
+#        'title': 'PROBA-V Level 1 data',
+#        'institution': 'VITO',
+#        'source': 'PROBA-V satellite observations',
+#        'history': f'Created {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+#        'references': 'https://proba-v.vgt.vito.be/',
+#    }
 
     # save geometry with CF attributes
     for var in ['lat', 'lon', 'SZA', 'SAA', 'VZA', 'VAA', 'VZA_IR', 'VAA_IR']:

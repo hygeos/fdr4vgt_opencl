@@ -15,17 +15,38 @@ class config_class:
     def set(self, name, value):
         self.__dict__[name] = value
 
+    def getfloat(self, part, name):
+        assert(name in self.__dict__.keys())
+        return self.__dict__[name]
+
+
 config = config_class()
 
 def build_flag(ds_input, ds_output, config_data):
-    flag_aot = ds_input.rtoa.max(dim="bands") >= config_data.getfloat("Coefficients", "aotmax")
-    flag_toc_min = ds_output.rtoc_run.min(dim="bands") < config_data.getfloat("Coefficients", "tocmin")
-    flag_toc_max = ds_output.rtoc_run.max(dim="bands") > config_data.getfloat("Coefficients", "tocmax")
-    flag_sza_max = ds_input.tetas > config_data.getfloat("Coefficients", "szamax")
-    flag = ((flag_aot.data.astype(np.int16) << 0) | #lsb
-            (flag_toc_min.data.astype(np.int16) << 1) |
-            (flag_toc_max.data.astype(np.int16) << 2) |
-            (flag_sza_max.data.astype(np.int16) << 3)) #msb
+#    flag_aot = ds_input.rtoa.max(dim="bands") >= config_data.getfloat("Coefficients", "aotmax")
+    flag_aot = np.max(ds_input['TOA'], axis=0) >= config_data.getfloat("Coefficients", "aotmax")
+#    flag_toc_min = ds_output.rtoc_run.min(dim="bands") < config_data.getfloat("Coefficients", "tocmin")
+    flag_toc_min = np.min(ds_output['rTOC'], axis=0) < config_data.getfloat("Coefficients", "tocmin")
+#    flag_toc_max = ds_output.rtoc_run.max(dim="bands") > config_data.getfloat("Coefficients", "tocmax")
+    flag_toc_max = np.max(ds_output['rTOC'], axis=0) > config_data.getfloat("Coefficients", "tocmax")
+#    flag_sza_max = ds_input.tetas > config_data.getfloat("Coefficients", "szamax")
+    flag_sza_max = ds_input['SZA'] > config_data.getfloat("Coefficients", "szamax")
+    flag_aot_grad = ds_output['aod_grad'] > config_data.getfloat("Coefficients", "aod_max_grad")
+    flag_cloud = ds_input['clm'] != 0 # cloud contaminated flag
+#    flag = ((flag_aot.data.astype(np.int16) << 0) | #lsb
+#            (flag_toc_min.data.astype(np.int16) << 1) |
+#            (flag_toc_max.data.astype(np.int16) << 2) |
+#            (flag_sza_max.data.astype(np.int16) << 3) |
+#            (flag_aot_grad.data.astype(np.int16) << 4)) #msb
+#    
+    flag = ( (flag_cloud.astype(np.int16) << 0) | #Bit 0 :cloud_contaminated
+             (flag_aot.astype(np.int16) << 1) | #Bit 1: High AOD
+             (flag_sza_max.astype(np.int16) << 2) | #Bit 2: High SZA
+             (flag_aot_grad.astype(np.int16) << 3) #| #Bit 3: High AOD gradient 
+#             (flag_ac_fail.astype(np.int16) << 4) |   #Bit 4: AC algorithm failure    
+#             (flag_missing_aux.astype(np.int16) << 5) |  #Bit 5: Missing auxiliary data
+#             (flag_out_lut.astype(np.int16) << 6))    #Bit 6: Out of LUT range
+    )
     return flag
 
 def compute_atmospheric_transmissions(cos_sun, cos_view,
@@ -54,9 +75,6 @@ def compute_atmospheric_transmissions(cos_sun, cos_view,
     
     # Rayleigh optical depth  
     tau_rayleigh = smac_coeffs[ca_ind['taur']] * pressure_eq 
-    print("smac :",  smac_coeffs[ca_ind['taur']], smac_coeffs[ca_ind['taur']].shape)
-    print("pression :", np.nanmean(pressure_eq))
-    print("tau_ray :", np.nanmean(tau_rayleigh))
     
     # Total transmission
     total_transmission = (smac_coeffs[ca_ind['a0T']] + 
@@ -66,9 +84,7 @@ def compute_atmospheric_transmissions(cos_sun, cos_view,
     
     # Direct transmission
     total_optical_depth = tau_aerosol + tau_rayleigh
-    print("tau_total :", np.nanmean(total_optical_depth))
     direct_transmission = np.exp(-total_optical_depth / cos_sun)
-    print("direct :", np.nanmean(direct_transmission))
     
     # Diffuse transmission
     diffuse_transmission = total_transmission - direct_transmission
@@ -607,8 +623,6 @@ if __name__ == '__main__':
     # uh2o = interp(dsSLV["TQV"] * config.k_uh2o, lat=Linear(latitude), lon=Linear(longitude), time=Linear(date_time)).T
     # uo3 = interp(dsSLV["TO3"] * config.k_uo3, lat=Linear(latitude), lon=Linear(longitude), time=Linear(date_time)).T
     pression = interp(dsSLV["SLP"] * k_p0, lat=Linear(latitude), lon=Linear(longitude), time=Linear(date_time)).T
-    print("pression global :", np.unique(pression))
-    exit(0)
 
     iaer_month, mean_totex_month, std_totex_month = calculate_monthly_aerosol(date_time, latitude, longitude)
 

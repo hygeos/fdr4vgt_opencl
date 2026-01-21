@@ -109,6 +109,7 @@ def read_ProbaV(dirname,
     camera = cam[basename(filename).split('_')[4]]
     src = xr.open_dataset(filename, chunks=chunks)
     cloud = src['SM_SHD']
+    print(cloud.attrs)
     map = cloud.attrs['MAPPING']
     lat_axis, lon_axis = set_latlon(map, cloud.shape)
     lon, lat = meshgrid(lon_axis, lat_axis)

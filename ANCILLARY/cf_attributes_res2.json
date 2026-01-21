@@ -1,0 +1,244 @@
+{
+  "global_attributes": {
+    "Conventions": "CF-1.8",
+    "title": "PROBA-V L2A Top-of-Canopy Reflectance with Uncertainty",
+    "institution": "FDR4VGT Project",
+    "source": "SMAC atmospheric correction with MERRA-2 reanalysis",
+    "references": "FDR4VGT documentation; SMAC algorithm (Rahman & Dedieu, 1994)",
+    "comment": "Surface reflectance product with propagated uncertainties",
+    "product_version": "1.0",
+    "processing_level": "L2A",
+    "sensor": "PROBA-V",
+    "platform": "PROBA-V"
+  },
+  "variables": {
+    "rTOA": {
+      "standard_name": "toa_bidirectional_reflectance",
+      "long_name": "Top of Atmosphere Bidirectional Reflectance Factor",
+      "units": "1",
+      "valid_min": 0.0,
+      "valid_max": 1.0,
+      "comment": "TOA reflectance for PROBA-V bands (Blue, Red, NIR, SWIR)"
+    },
+    "rTOC": {
+      "standard_name": "surface_bidirectional_reflectance",
+      "long_name": "Top of Canopy Bidirectional Reflectance Factor",
+      "units": "1",
+      "valid_min": 0.0,
+      "valid_max": 1.0,
+      "comment": "Atmospherically corrected surface reflectance"
+    },
+    "UrTOC": {
+      "long_name": "Top of Canopy Reflectance Uncertainty",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Total propagated uncertainty in TOC reflectance"
+    },
+    "Drsurf": {
+      "long_name": "Surface Reflectance Random Uncertainty Component",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Random uncertainty component of surface reflectance"
+    },
+    "Jrtoa": {
+      "long_name": "Jacobian of TOC reflectance with respect to TOA reflectance",
+      "units": "1",
+      "comment": "∂ρTOC/∂ρTOA - Sensitivity of surface reflectance to TOA reflectance"
+    },
+    "Juo3": {
+      "long_name": "Jacobian of TOC reflectance with respect to ozone",
+      "units": "cm2 g-1",
+      "comment": "∂ρTOC/∂O3 - Sensitivity of surface reflectance to ozone column"
+    },
+    "Juh2o": {
+      "long_name": "Jacobian of TOC reflectance with respect to water vapor",
+      "units": "cm2 g-1",
+      "comment": "∂ρTOC/∂H2O - Sensitivity of surface reflectance to water vapor column"
+    },
+    "Jpre": {
+      "long_name": "Jacobian of TOC reflectance with respect to pressure",
+      "units": "hPa-1",
+      "comment": "∂ρTOC/∂P - Sensitivity of surface reflectance to atmospheric pressure"
+    },
+    "SZA": {
+      "standard_name": "solar_zenith_angle",
+      "long_name": "Solar Zenith Angle",
+      "units": "degree",
+      "valid_min": 0.0,
+      "valid_max": 90.0,
+      "comment": "Angle between sun and local vertical"
+    },
+    "SAA": {
+      "standard_name": "solar_azimuth_angle",
+      "long_name": "Solar Azimuth Angle",
+      "units": "degree",
+      "valid_min": 0.0,
+      "valid_max": 360.0,
+      "comment": "Azimuth angle of sun measured clockwise from north"
+    },
+    "VZA": {
+      "standard_name": "sensor_zenith_angle",
+      "long_name": "Sensor Zenith Angle (VNIR)",
+      "units": "degree",
+      "valid_min": 0.0,
+      "valid_max": 90.0,
+      "comment": "Viewing zenith angle for VNIR bands"
+    },
+    "VZA_IR": {
+      "standard_name": "sensor_zenith_angle",
+      "long_name": "Sensor Zenith Angle (SWIR)",
+      "units": "degree",
+      "valid_min": 0.0,
+      "valid_max": 90.0,
+      "comment": "Viewing zenith angle for SWIR bands"
+    },
+    "VAA": {
+      "standard_name": "sensor_azimuth_angle",
+      "long_name": "Sensor Azimuth Angle (VNIR)",
+      "units": "degree",
+      "valid_min": 0.0,
+      "valid_max": 360.0,
+      "comment": "Viewing azimuth angle for VNIR bands"
+    },
+    "VAA_IR": {
+      "standard_name": "sensor_azimuth_angle",
+      "long_name": "Sensor Azimuth Angle (SWIR)",
+      "units": "degree",
+      "valid_min": 0.0,
+      "valid_max": 360.0,
+      "comment": "Viewing azimuth angle for SWIR bands"
+    },
+    "TOTEXTTAU": {
+      "standard_name": "atmosphere_optical_thickness_due_to_aerosol",
+      "long_name": "Aerosol Optical Depth at 550nm",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Total aerosol extinction optical thickness from MERRA-2"
+    },
+    "TO3": {
+      "standard_name": "equivalent_thickness_at_stp_of_atmosphere_ozone_content",
+      "long_name": "Total Column Ozone",
+      "units": "DU",
+      "valid_min": 0.0,
+      "comment": "Total ozone column from MERRA-2"
+    },
+    "TQV": {
+      "standard_name": "atmosphere_mass_content_of_water_vapor",
+      "long_name": "Total Precipitable Water Vapor",
+      "units": "kg m-2",
+      "valid_min": 0.0,
+      "comment": "Vertically integrated water vapor from MERRA-2"
+    },
+    "SLP": {
+      "standard_name": "air_pressure_at_mean_sea_level",
+      "long_name": "Sea Level Pressure",
+      "units": "Pa",
+      "comment": "Mean sea level pressure from MERRA-2"
+    },
+    "T10M": {
+      "standard_name": "air_temperature",
+      "long_name": "Temperature at 10m",
+      "units": "K",
+      "comment": "Air temperature at 10m height from MERRA-2"
+    },
+    "elev": {
+      "standard_name": "surface_altitude",
+      "long_name": "Surface Elevation",
+      "units": "m",
+      "comment": "Digital elevation model height above geoid"
+    },
+    "lat": {
+      "standard_name": "latitude",
+      "long_name": "Latitude",
+      "units": "degrees_north",
+      "valid_min": -90.0,
+      "valid_max": 90.0,
+      "axis": "Y"
+    },
+    "lon": {
+      "standard_name": "longitude",
+      "long_name": "Longitude",
+      "units": "degrees_east",
+      "valid_min": -180.0,
+      "valid_max": 180.0,
+      "axis": "X"
+    },
+    "err_slope": {
+      "long_name": "Slope-induced Reflectance Error",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Error due to terrain slope effects on atmospheric path"
+    },
+    "clm": {
+      "standard_name": "cloud_binary_mask",
+      "long_name": "Cloud Mask",
+      "units": "1",
+      "flag_values": [0, 1],
+      "flag_meanings": "clear cloudy",
+      "comment": "Cloud detection mask"
+    },
+    "ac_flag": {
+      "long_name": "Atmospheric Correction Quality Flag",
+      "units": "1",
+      "comment": "Quality flag for atmospheric correction processing"
+    },
+    "ac_process_flag": {
+      "long_name": "Atmospheric Correction Processing Flag",
+      "units": "1",
+      "comment": "Processing status flag for atmospheric correction"
+    },
+    "SM_MAP": {
+      "long_name": "Status Map",
+      "units": "1",
+      "comment": "Per-band status/quality map"
+    },
+    "Drtoa": {
+      "long_name": "Uncertainty Contribution from TOA Reflectance",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Propagated uncertainty from TOA: |J_rtoa| × σ_rtoa"
+    },
+    "Duo3": {
+      "long_name": "Uncertainty Contribution from Ozone",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Propagated uncertainty from ozone: |J_o3| × σ_o3"
+    },
+    "Duh2o": {
+      "long_name": "Uncertainty Contribution from Water Vapor",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Propagated uncertainty from water vapor: |J_h2o| × σ_h2o"
+    },
+    "Dpre": {
+      "long_name": "Uncertainty Contribution from Pressure",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Propagated uncertainty from pressure: |J_p| × σ_p"
+    },
+    "Dtaup": {
+      "long_name": "Uncertainty Contribution from AOD",
+      "units": "1",
+      "valid_min": 0.0,
+      "comment": "Propagated uncertainty from AOD: |J_aod| × σ_aod"
+    }
+  },
+  "coordinates": {
+    "bands": {
+      "long_name": "Spectral Band Index",
+      "units": "1",
+      "comment": "0=Blue, 1=Red, 2=NIR, 3=SWIR",
+      "band_names": "Blue Red NIR SWIR",
+      "central_wavelengths": "462 655 843 1599",
+      "central_wavelength_units": "nm"
+    }
+  },
+  "encoding": {
+    "default": {
+      "dtype": "float32",
+      "zlib": true,
+      "complevel": 4,
+      "_FillValue": -9999.0
+    }
+  }
+}
