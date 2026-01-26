@@ -45,6 +45,7 @@ jax = '*'
 psutil = '*'
 xdem = "0.1.5.*"
 config = '*'
+ONNXRuntime = '*'
 
 
 [tool.pixi.feature.sys.dependencies]

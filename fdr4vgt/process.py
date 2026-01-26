@@ -5,8 +5,8 @@ import xarray as xa
 from core import interpolate
 import numpy as np
 from pathlib import Path
-import harp
-import core
+#import harp
+#import core
 #from harp.providers.NASA import MERRA2
 #from tempfile import TemporaryDirectory
 import dask.array as da
@@ -203,7 +203,7 @@ def read_merra(merra_aer, merra_p2, lat_sat, lon_sat, time, chunks):
     del aer
     del p2
 
-    merra = xa.Dataset({'TOTEXTTAU':tau, 'TQV':uh2o, 'TO3':uo3, 'SLP':p0, 'T10M':t10m, 'BC_FRAC':bc_frac/tau, 'DU_FRAC':du_frac/tau, 'SS_FRAC':ss_frac/tau, 'SU_FRAC':su_frac/tau, "OC_FRAC":oc_frac, 
+    merra = xa.Dataset({'TOTEXTTAU':tau, 'TQV':uh2o*1e-1, 'TO3':uo3*1e-3, 'SLP':p0*1e-2, 'T10M':t10m, 'BC_FRAC':bc_frac/tau, 'DU_FRAC':du_frac/tau, 'SS_FRAC':ss_frac/tau, 'SU_FRAC':su_frac/tau, "OC_FRAC":oc_frac/tau, 
                        'lat': lat_sat, 'lon': lon_sat}
                        )
     merra = merra.chunk({'y':chunks, 'x':chunks})
@@ -273,7 +273,7 @@ def array_to_jax_batched(a, batch_size=1000):
 
     return batch
 
-def compute_urtoc(Jtoa, Utoa, Jh2o, Uh2o,Jo3, Uo3, Jps, Ups, Jt550, Ut550, Urtoc_ens, Urtoc_rtm, u2_0):
+def compute_urtoc(Jtoa, Utoa, Jh2o, Uh2o,Jo3, Uo3, Jps, Ups, Jt550, Ut550, Urtoc_ens, Urtoc_rtm_slope, Urtoc_rtm_brdf, Urtoc_rtm_fit, u2_0):
 
     unc_toa = Jtoa*Utoa
     sum = unc_toa ** 2
@@ -293,12 +293,14 @@ def compute_urtoc(Jtoa, Utoa, Jh2o, Uh2o,Jo3, Uo3, Jps, Ups, Jt550, Ut550, Urtoc
     dummy = Urtoc_ens
     sum += dummy ** 2
 
-    dummy = Urtoc_rtm
-    sum += dummy ** 2
+#    dummy = Urtoc_rtm_slope
+#    sum += dummy ** 2
+    sum += Urtoc_rtm_brdf ** 2
+    sum += Urtoc_rtm_fit ** 2
 
     sum += u2_0 ** 2
 
-    return np.sqrt(sum), (unc_h2o, unc_o3, unc_ps, unc_aot)
+    return np.sqrt(sum), (np.abs(unc_h2o), np.abs(unc_o3), np.abs(unc_ps), np.abs(unc_aot))
 
 
 @memory_tracker
@@ -328,7 +330,10 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
         iaero[1:] = iaer_month
         ds_out = S.run(data_batch, iaero)
         pression = data_batch['SLP'] * config_['k_p0']
-        slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values/1013., ca_, ca_ind, iaer_month[0])
+        #slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values/1013., ca_, ca_ind, iaer_month[0])
+        slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaer_month[0])
+        slope_err = np.maximum(slope_err, -2)
+        slope_err = np.minimum(slope_err, 2)
 
         if config_['debug']:
             ds_out['iaero'] = (('y','x'), iaer_best)
@@ -349,14 +354,22 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
         del ygrad
         del xgrad
 
+        urtoc_rtm_slope = ds_out['rTOC'].values*(slope_err - 1)
         ds_out['slope_err'] = (('bands','y', 'x'), slope_err)
+        ds_out['urtoc_terrain'] = (('bands','y', 'x'), urtoc_rtm_slope)
         flag = build_flag(data_batch, ds_out, config)
 #        ds_out['flag'] = (('y','x'), flag)
         ds_out['flag'] = flag
-        urtoc_rtm = np.zeros_like(ds_out['UrTOC_ens'].values)
-        ds_out['UrTOC_rtm'] = (('bands', 'y', 'x'), urtoc_rtm) 
 
-        urtoc, unc = compute_urtoc(ds_out['Jrtoa'].values, ds_out['Drtoa'].values, ds_out['Juh2o'].values, ds_out['Duh2o'].values, ds_out['Juo3'].values, ds_out['Duo3'].values, ds_out['Jpre'].values, ds_out['Dpre'].values, ds_out['Jtau550'].values, ds_out['Dtaup'].values, ds_out['UrTOC_ens'].values, urtoc_rtm, config_['u2_0'])
+#        urtoc_rtm = np.zeros_like(ds_out['UrTOC_ens'].values)
+#        urtoc_rtm += urtoc_rtm_slope
+        urtoc_rtm_brdf = np.zeros_like(ds_out['UrTOC_ens'].values)
+        urtoc_rtm_fit = np.zeros_like(ds_out['UrTOC_ens'].values)
+#        urtoc_rtm = np.sqrt(urtoc_rtm_slope**2 + urtoc_rtm_brdf**2 + urtoc_rtm_fit**2)
+        ds_out['UrTOC_rtm_fit'] = (('bands', 'y', 'x'), urtoc_rtm_fit)
+        ds_out['UrTOC_rtm_brdf'] = (('bands', 'y', 'x'), urtoc_rtm_brdf)
+    
+        urtoc, unc = compute_urtoc(ds_out['Jrtoa'].values, ds_out['Drtoa'].values, ds_out['Juh2o'].values, ds_out['Duh2o'].values, ds_out['Juo3'].values, ds_out['Duo3'].values, ds_out['Jpre'].values, ds_out['Dpre'].values, ds_out['Jtau550'].values, ds_out['Dtaup'].values, ds_out['UrTOC_ens'].values, urtoc_rtm_slope, urtoc_rtm_brdf, urtoc_rtm_fit, config_['u2_0'])
         ds_out['UrTOC'] = (('bands','y','x'), urtoc)
         ds_out['unc_h2o'] = (('bands','y','x'), unc[0])
         ds_out['unc_o3']  = (('bands','y','x'), unc[1])
@@ -438,11 +451,11 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     # read ProbaV data
     data = Level1(dirname, 'probav', chunks=chunks)
     data = calc_error(data)
+    filtre = np.isnan(data['SZA'])
 
     dir_brdf = config_['brdf_dir']
     date = data['mean-time']
     k1p, k2p = load_brdf(dir_brdf, date, data['lat'], data['lon'], chunks)
-    print(k1p)
     data['k1p'] = k1p
     data['k2p'] = k2p
     del k1p
@@ -459,63 +472,27 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     # read MERRA2
     merra = read_merra(merra_aer, merra_p2, data['lat'], data['lon'], data['mean-time'], chunks)
     for p in ['TOTEXTTAU','TQV','TO3','SLP','T10M','BC_FRAC','DU_FRAC','SS_FRAC','SU_FRAC','OC_FRAC']:
-        data[p] = merra[p]
+        tmp = merra[p].where(~filtre, other=np.nan)
+        data[p] = tmp
 
     del merra
 
     # read smac coeffs
     bandnames = {'band1':'BLUE_TOA', 'band2':'RED_TOA', 'band3':'NIR_TOA', 'band4':'SWIR_TOA'}
-#    smac_coeffs = read_smaccoeffs_probav(smac_dir, data.CAMERA, config['smaccoef_version'], bandnames)
     frac_aer_model = pre_aer_models(aer_file)
 
-    smac_coeffs_file = Path('/archive/proj/C3S')/'{sensor}_{camera}_smac_coeffs_v{version}.npy'.format(sensor=config_['sensor'], camera=data.CAMERA, version=config_['smaccoef_version'])
+    smaccoef_dir = config_['smaccoef_dir']
+#    smac_coeffs_file = Path('/archive/proj/C3S')/'{sensor}_{camera}_smac_coeffs_v{version}.npy'.format(sensor=config_['sensor'], camera=data.CAMERA, version=config_['smaccoef_version'])
+    smac_coeffs_file = Path(smaccoef_dir)/'{sensor}_{camera}_smac_coeffs_v{version}.npy'.format(sensor=config_['sensor'], camera=data.CAMERA, version=config_['smaccoef_version'])
     ca_, ca_ind = read_smac_coefficients(smac_coeffs_file)
-#    ca = get_smac_coeffs(smac_coeffs_file)
-#    ca = transform_ca_to_structured(ca_, ca_ind)
 
     latitude = data.lat
     longitude = data.lon
     date_time = data['mean-time']
     print("date_time : ", date_time)
-#    base = config_['amip_path'] + "/m2amip{}.tavgM_2d_aer_Nx.{}.nc4"
-#    iaer_month, mean_totex_month, std_totex_month = calculate_monthly_aerosol(date_time, latitude, longitude)
-#    print(iaer_month)
     data = data.assign_attrs({'jac_name' : ['Juh2o','Juo3','Jrtoa','Jpre','Drsurf']})
     data = data.chunk({'y':chunks, 'x':chunks, 'bands':-1})
     toc,  jac = process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=64)
-    exit(0)
-#    ds_out = process_block(data, frac_aer_model, ca, ca_ind, config, batch_size=128)
-#    toc_err = 
-#    out = run_smac_neo(data, frac_aer_model, ca, ca_ind, config)
-
-
-    # process
-#    S = ISmaccl(config, platform='CPU', breakpoint=False)
-##    S.run(data, merra, dem, frac_aer_model, smac_coeffs)
-#    out = S.run(data, frac_aer_model, smac_coeffs)
-#    print("resultat : ",out)
-    assert(ds_out is not None)
-    # save TOC
-#    ds_out.compute(scheduler='synchronous')
-    ds_out.compute()
-    print("ds_out : ", np.unique(ds_out['rsurf'].values))
-    ds_out.to_netcdf(fileout)
-#    ds_out['rsurf'].compute()
-#    print("out : ", ds_out['rsurf'].values)
-#    ds_out.to_netcdf(fileout)
-#    data = data.drop_vars(['TOA', 'ERROR'])
-#    data['TOC'] = (['band','y','x','aermodel'], ds_out['rsurf'].data)
-#    data['rsurf_best'] = (['band','y','x'], ds_out['rsurf'].data[:,:,:,0])
-#    if ds_out['rsurf'].shape[3] > 1:
-#        data['rsurf_mean'] = (['band','y','x'], np.nanmean(ds_out['rsurf'].data[:,:,:,1:], axis=3))
-#    data['jacobians'] = (['njac','band','y','x'], np.zeros((len(data.jac_name), data['TOC'].shape[0], data['TOC'].shape[1], data['TOC'].shape[2]), dtype=np.float32))
-#    for i, name in enumerate(data.jac_name):
-#        print(i, name)
-#        print(ds_out[name].data.shape)
-#        data['jacobians'][i,:,:,:] = ds_out[name].data
-##    data['jacobians'] = (['njac','band','y','x'], jac)
-##    save_nc(data, fileout)
-#    save_nc(data, fileout)
 
 if __name__ == '__main__':
     import sys

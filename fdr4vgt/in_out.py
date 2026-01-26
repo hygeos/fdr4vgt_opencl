@@ -159,8 +159,8 @@ def create_nc(filename, gl_size, bands, attrs, version):
     return out
 
 def attrs_corr(attr):
-    del attr['time_find_index']
-    del attr['time_interp']
+    if 'time_find_index' in attr: del attr['time_find_index']
+    if 'time_interp' in attr: del attr['time_interp']
 #    for key, values in attr.items():
 #        print('key :',key, type(values))
 #        if isinstance(values, datetime):
@@ -180,20 +180,18 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False
     y_end = min(y_start + band_size, out.dimensions['height'].size)
 
 #    list_vars_out = ['rTOC', 'UrTOC', 'flag']
-    list_vars_out = {'Rtoc_': 'rTOC', 'Rtoc_uncertainty_': 'UrTOC', 'Quality_flag': 'flag'}
-#    list_vars_in = {'SM_MAP': 'SM_MAP', 'clm':'clm'}
-    list_vars_in = {}
+    list_vars_out = {'Rtoc_': 'rTOC', 'Rtoc_uncertainty_': 'UrTOC', 'uncertainty_from_RTM_terrain_':'urtoc_terrain', 'Quality_flag': 'flag'}
+    list_vars_in = {'SM_MAP_': 'SM_MAP', 'clm':'clm'}
     if error:
         list_vars_out = {**list_vars_out, **{'Jacobian_Rtoc_vs_Rtoa_': 'Jrtoa', 'Jacobian_Rtoc_vs_UO3_': 'Juo3', 'Jacobian_Rtoc_vs_UH2O_': 'Juh2o',
                                             'Jacobian_Rtoc_vs_Ps_': 'Jpre', 'Jacobian_Rtoc_vs_AOD_': 'Jtau550',
                                             'uncertainty_from_ozone_': 'unc_o3', 'uncertainty_from_h2o_': 'unc_h2o', 'uncertainty_from_pressure_': 'unc_ps', 'uncertainty_from_aod_': 'unc_aot',
-                                            'uncertainty_from_terrain_':'slope_err','uncertainty_from_RTM_fit_':'UrTOC_rtm', 'uncertainty_from_aerosol_':'UrTOC_ens'} 
+                                            'uncertainty_from_RTM_BRDF_':'UrTOC_rtm_brdf', 'uncertainty_from_RTM_fit_':'UrTOC_rtm_fit', 'uncertainty_from_aerosol_':'UrTOC_ens'} 
                                               }
-        list_vars_in = {'uncertainty_from_TOA_':'ERROR'}
+        list_vars_in = {**list_vars_in, **{'uncertainty_from_TOA_':'ERROR'}}
     if debug:
         list_vars_out = {**list_vars_out, **{'aerosol_model_index':'iaero'}}
         list_vars_in = {**list_vars_in, **{'AOD_550_used': 'TOTEXTTAU', 'ozone_column_used': 'TO3', 'water_vapor_column_used': 'TQV', 'surface_pressure_used': 'SLP'}}
-#        list_vars_out += ['Duh2o','Duo3','Drtoa','Dpre','Dtaup']
 
     # global attributes
     out.setncatts(ds_out.attrs)
@@ -208,7 +206,6 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False
                 out[var].setncatts({**existing_attrs})
             out.variables[var][y_start:y_end,:] = ds_in[var].values
 
-#    for iband, band in enumerate(ds_in.attrs['bands']):
     for var_out, var_in in list_vars_out.items():
         if len(ds_out[var_in].dims) == 3:
             for ib in range(ds_out[var_in].shape[0]):
