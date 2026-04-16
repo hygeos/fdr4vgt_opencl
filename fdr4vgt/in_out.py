@@ -6,6 +6,7 @@ import numpy as np
 from glob import glob
 import dask as dk
 from core import interpolate
+from funcs import memory_tracker
 
 
 # Définition des attributs CF standards
@@ -71,7 +72,7 @@ from core import interpolate
 #    },
 #}
 
-def load_brdf(dirname, date, lat, lon, chunks):
+def load_brdf(dirname, date, lat, lon, nbands, chunks):
     '''
     Load BRDF coefficients for a given date
     Inputs:
@@ -87,13 +88,20 @@ def load_brdf(dirname, date, lat, lon, chunks):
     filename = glob(filename)
 
     if len(filename) != 1:
-#        k1p = dk.array.from_array(np.zeros((lat.shape[0], lat.shape[1]), dtype='float32'), chunks=chunks)
-        k1p = xa.DataArray(np.zeros((lat.shape[0], lat.shape[1]), dtype='float32'), dims=('y','x'))
+        k1p = xa.DataArray(np.zeros((nbands, lat.shape[0], lat.shape[1]), dtype='float32'), dims=('bands', 'y','x'))
         return k1p, k1p
 
+    filename = filename[0]
     ds = xa.open_dataset(filename) #, chunks={'y':chunks, 'x':chunks})
-    
-    k012  =    interpolate.interp(ds['K012'], Y=interpolate.Linear(lat), X=interpolate.Linear(lon), ).astype(np.float32)
+
+    lat_axis = ds['LAT'][:,0]
+    lon_axis = ds['LON'][0,:]
+    ds = ds.rename_dims({'Y': 'lat_axis', 'X': 'lon_axis'})
+    ds = ds.assign_coords({
+        'lat_axis': lat_axis.values,
+        'lon_axis': lon_axis.values
+    })
+    k012 = interpolate.interp(ds['K012'], lat_axis=interpolate.Linear(lat), lon_axis=interpolate.Linear(lon)).astype(np.float32)
     k0 = k012[:, :, :,0]
     k1 = k012[:, :, :,1]
     k2 = k012[:, :, :,2]
@@ -101,11 +109,12 @@ def load_brdf(dirname, date, lat, lon, chunks):
     k2p = k2/k0
     filtre = np.logical_not(np.isfinite(k1p))
     k1p = k1p.where(filtre, other=0.0)
+    k1p = k1p.transpose('NBAND','y','x')
     filtre = np.logical_not(np.isfinite(k2p))
     k2p = k2p.where(filtre, other=0.0)
+    k2p = k2p.transpose('NBAND','y','x')
 
     return k1p, k2p
-
 
 def Level1(input, sensor, chunks=None):
     '''
@@ -169,7 +178,8 @@ def attrs_corr(attr):
 
     return attr
 
-def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False):  
+#@memory_tracker
+def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False): #, debug=False):  
     '''
     Save a batch of data to a NetCDF file.
     out : pointer to the netCDF4 Dataset
@@ -181,7 +191,8 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False
 
 #    list_vars_out = ['rTOC', 'UrTOC', 'flag']
     list_vars_out = {'Rtoc_': 'rTOC', 'Rtoc_uncertainty_': 'UrTOC', 'uncertainty_from_RTM_terrain_':'urtoc_terrain', 'Quality_flag': 'flag'}
-    list_vars_in = {'SM_MAP_': 'SM_MAP', 'clm':'clm'}
+    #list_vars_in = {'SM_MAP_': 'SM_MAP', 'clm':'clm'}
+    list_vars_in = {'clm':'clm', 'TOA_':'TOA','SM_MAP':'SM_MAP'}
     if error:
         list_vars_out = {**list_vars_out, **{'Jacobian_Rtoc_vs_Rtoa_': 'Jrtoa', 'Jacobian_Rtoc_vs_UO3_': 'Juo3', 'Jacobian_Rtoc_vs_UH2O_': 'Juh2o',
                                             'Jacobian_Rtoc_vs_Ps_': 'Jpre', 'Jacobian_Rtoc_vs_AOD_': 'Jtau550',
@@ -189,17 +200,17 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False
                                             'uncertainty_from_RTM_BRDF_':'UrTOC_rtm_brdf', 'uncertainty_from_RTM_fit_':'UrTOC_rtm_fit', 'uncertainty_from_aerosol_':'UrTOC_ens'} 
                                               }
         list_vars_in = {**list_vars_in, **{'uncertainty_from_TOA_':'ERROR'}}
-    if debug:
-        list_vars_out = {**list_vars_out, **{'aerosol_model_index':'iaero'}}
-        list_vars_in = {**list_vars_in, **{'AOD_550_used': 'TOTEXTTAU', 'ozone_column_used': 'TO3', 'water_vapor_column_used': 'TQV', 'surface_pressure_used': 'SLP'}}
+    list_vars_out = {**list_vars_out, **{'aerosol_model_index':'iaero'}}
+    list_vars_in = {**list_vars_in, **{'AOD_550_used': 'TOTEXTTAU', 'ozone_column_used': 'TO3', 'water_vapor_column_used': 'TQV', 'surface_pressure_used': 'SLP'}}
 
     # global attributes
     out.setncatts(ds_out.attrs)
-
+    existing_vars = set(out.variables.keys())
 
     for var in ['lat','lon','SZA', 'SAA', 'VZA', 'VAA', 'VZA_IR', 'VAA_IR']:
         if var in ds_in.variables.keys():
-            if var not in out.variables.keys():
+#            if var not in out.variables.keys():
+            if var not in existing_vars:
                 dtype = ds_in[var].dtype
                 out.createVariable(var, dtype, ('height','width'), zlib=True, complevel=4)
                 existing_attrs = ds_in[var].attrs if hasattr(ds_in[var], 'attrs') else {}
@@ -210,14 +221,15 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False
         if len(ds_out[var_in].dims) == 3:
             for ib in range(ds_out[var_in].shape[0]):
                 var_out_band = '{}B{}'.format(var_out, ib+1)
-                if var_out_band not in out.variables.keys():
+#                if var_out_band not in out.variables.keys():
+                if var_out_band not in existing_vars:
                     dtype = ds_out[var_in].dtype
                     out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=4)
                     existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
                     out[var_out_band].setncatts({**existing_attrs})
                 out.variables[var_out_band][y_start:y_end, :] = ds_out[var_in][ib, :, :].values
         elif len(ds_out[var_in].dims) == 2:
-            if var_out not in out.variables.keys():
+            if var_out not in existing_vars:
                 dtype = ds_out[var_in].dtype
                 out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=4)
                 existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
@@ -229,14 +241,14 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False, debug=False
         if len(ds_in[var_in].dims) == 3:
             for ib in range(ds_in[var_in].shape[0]):
                 var_out_band = '{}B{}'.format(var_out, ib+1)
-                if var_out_band not in out.variables.keys():
+                if var_out_band not in existing_vars:
                     dtype = ds_in[var_in].dtype
                     out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=4)
                     existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}
                     out[var_out_band].setncatts({**existing_attrs})
                 out.variables[var_out_band][y_start:y_end, :] = ds_in[var_in][ib, :, :].values
         elif len(ds_in[var_in].dims) == 2:
-            if var_out not in out.variables.keys():
+            if var_out not in existing_vars:
                 dtype = ds_in[var_in].dtype
                 out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=4)
                 existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}

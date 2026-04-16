@@ -12,98 +12,20 @@ from pathlib import Path
 import dask.array as da
 #from lib.jsmac_lib_dev import read_smac_coefficients, smac_neo
 import jax.numpy as jnp
-import psutil
-import os
-import functools
 from time import time
-import logging
-import datetime
+#import datetime
 import gc
 import sys
 import dask
-from funcs import calculate_monthly_aerosol, config, get_slope_err, read_smac_coefficients, build_flag
+from funcs import calculate_monthly_aerosol, config, get_slope_err, open_monthly_aerosol, read_smac_coefficients, build_flag, setup_logger, memory_tracker, get_iaer
 from CF_from_json import apply_cf_attributes_from_json, validate_cf_compliance
+import onnxruntime as ort
 
 from smaccl.ISmaccl import ISmaccl
 from smaccl.smaccl import type_coeff, get_smac_coeffs
 
-def setup_logger():
-    """Configure le logger avec un format plus détaillé"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s | %(levelname)s | %(message)s',
-        handlers=[
-            logging.FileHandler(f'memory_usage_{datetime.datetime.now():%Y%m%d_%H%M}.log'),
-            logging.StreamHandler()
-        ]
-    )
-
 # Ajouter au début du fichier, après les imports
-setup_logger()
-
-def memory_tracker(func):
-    """Décorateur pour suivre l'utilisation de la mémoire d'une fonction"""
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        pc = psutil.Process(os.getpid())
-        
-        # Mesure avant exécution
-        mem_before = pc.memory_info().rss / 1024 / 1024  # En MB
-        start_time = time()
-        peak_memory = mem_before
-        
-        # Fonction pour mesurer la mémoire pendant l'exécution
-        def get_current_memory():
-            return pc.memory_info().rss / 1024 / 1024
-        
-        try:
-            # Exécution de la fonction
-            result = func(*args, **kwargs)
-            
-            # Mesure finale
-            peak_memory = max(peak_memory, get_current_memory())
-            end_time = time()
-            mem_after = get_current_memory()
-            
-            # Calcul des différences
-            duration = end_time - start_time
-            mem_diff = mem_after - mem_before
-            
-            logging.info(
-                f"\n{'='*50}\n"
-                f"Function: {func.__name__}\n"
-                f"Memory before: {mem_before:,.2f} MB\n"
-                f"Memory after: {mem_after:,.2f} MB\n"
-                f"Peak memory: {peak_memory:,.2f} MB\n"
-                f"Memory used: {mem_diff:,.2f} MB\n"
-                f"Duration: {duration:.2f} seconds\n"
-                f"{'='*50}"
-            )
-            
-            return result
-            
-        except Exception as e:
-            # En cas d'erreur, on log quand même l'utilisation mémoire
-            end_time = time()
-            mem_after = get_current_memory()
-            peak_memory = max(peak_memory, mem_after)
-            
-            logging.error(
-                f"\n{'='*50}\n"
-                f"Function: {func.__name__} (FAILED)\n"
-                f"Error: {str(e)}\n"
-                f"Memory before: {mem_before:,.2f} MB\n"
-                f"Memory after: {mem_after:,.2f} MB\n"
-                f"Peak memory: {peak_memory:,.2f} MB\n"
-                f"Duration: {end_time - start_time:.2f} seconds\n"
-                f"{'='*50}"
-            )
-            raise
-            
-    return wrapper
-
-#def rsme_aod(tau_550, sigma_base, sigma_rel):
-#    return np.maximum(sigma_base, sigma_rel*tau_550)
+#setup_logger()
 
 def Ps(z,p0,T, g=9.801, R=287.058, lam=-0.006):
     T1 = np.log(R*T) - np.log(-R*lam*z+R*T)
@@ -126,32 +48,31 @@ def closest_models(X, Xb):
 
     return np.sum((X[:, np.newaxis, :]-Xb[:, :, np.newaxis])**2, axis=0).argsort(axis=0)[:11, :]
 
-#def get_iaero(frac_aer_model, lat, frac, good, config):
-def get_iaero(frac_aer_model, lat, frac, config):
+#def get_iaero(frac_aer_model, lat, frac, config):
+#
+#    iaero = None
+#    xb = []
+#    xm = []
+#    # OPTIONAEROFIXE
+#    if 'aero_nmod' in config.keys():
+#        nb_pixel = len(lat)
+#        iaero = np.zeros(nb_pixel)
+#        iaero[:] = config['aero_nmod']
+#    else:
+#        sizes = frac[0].shape
+#        for k,key in enumerate(frac_aer_model.keys()):
+##            frac = merra[match[key]+'_FRAC'].data[good].astype(np.float32, order='C')
+#            xb.append(frac_aer_model[key])
+##            xm.append(frac[k][good])
+#            xm.append(frac[k].ravel())
+#        xb = np.stack(xb, axis=0)
+#        xm = np.stack(xm, axis=0)
+#        iaero = closest_model(xm, xb)
+#        iaero = iaero.reshape(sizes).astype(np.int32)
+#
+#    return iaero
 
-    iaero = None
-    xb = []
-    xm = []
-    # OPTIONAEROFIXE
-    if 'aero_nmod' in config.keys():
-        nb_pixel = len(lat)
-        iaero = np.zeros(nb_pixel)
-        iaero[:] = config['aero_nmod']
-    else:
-        sizes = frac[0].shape
-        for k,key in enumerate(frac_aer_model.keys()):
-#            frac = merra[match[key]+'_FRAC'].data[good].astype(np.float32, order='C')
-            xb.append(frac_aer_model[key])
-#            xm.append(frac[k][good])
-            xm.append(frac[k].ravel())
-        xb = np.stack(xb, axis=0)
-        xm = np.stack(xm, axis=0)
-        iaero = closest_model(xm, xb)
-        iaero = iaero.reshape(sizes).astype(np.int32)
-
-    return iaero
-
-@memory_tracker
+#@memory_tracker
 def readConfig(configfile):
     cf = configparser.ConfigParser()
     cf.read(configfile)
@@ -169,36 +90,36 @@ def readConfig(configfile):
 
     return config
 
-@memory_tracker
+#@memory_tracker
 def read_dem(dem, lat , lon, chunks=None):
     dem = xa.open_dataset(dem) #, chunks=chunks)
     elev = dem['elev']
     Delev = dem['Delev']
     elev_interp = interpolate.interp(elev, lat=interpolate.Linear(lat), lon=interpolate.Linear(lon)).astype(np.float32)
     Delev_interp = interpolate.interp(Delev, lat=interpolate.Linear(lat), lon=interpolate.Linear(lon)).astype(np.float32)
-    dem = xa.Dataset({'elev': elev_interp.T, 'Delev': Delev_interp.T, 'lat': lat, 'lon': lon})
+#    dem = xa.Dataset({'elev': elev_interp.T, 'Delev': Delev_interp.T, 'lat': lat, 'lon': lon})
+    dem = xa.Dataset({'elev': elev_interp, 'Delev': Delev_interp, 'lat': lat, 'lon': lon})
     dem = dem.chunk({'y':chunks, 'x':chunks}) 
 
     return dem
 
-@memory_tracker
+#@memory_tracker
 def read_merra(merra_aer, merra_p2, lat_sat, lon_sat, time, chunks):
     aer = xa.open_dataset(merra_aer)
-    print(aer)
     p2 = xa.open_dataset(merra_p2)
     assert((time >= np.min(aer['time'])) and (time <= np.max(aer['time'])))
     assert((time >= np.min(p2['time'])) and (time <= np.max(p2['time'])))
 
-    tau  =    interpolate.interp(aer['TOTEXTTAU'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    uh2o    = interpolate.interp(p2['TQV'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    uo3     = interpolate.interp(p2['TO3'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    p0      = interpolate.interp(p2['SLP'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    t10m    = interpolate.interp(p2['T10M'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    bc_frac = interpolate.interp(aer['BCEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    du_frac = interpolate.interp(aer['DUEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    oc_frac = interpolate.interp(aer['OCEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    ss_frac = interpolate.interp(aer['SSEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
-    su_frac = interpolate.interp(aer['SUEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32).T
+    tau  =    interpolate.interp(aer['TOTEXTTAU'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    uh2o    = interpolate.interp(p2['TQV'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    uo3     = interpolate.interp(p2['TO3'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    p0      = interpolate.interp(p2['SLP'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    t10m    = interpolate.interp(p2['T10M'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    bc_frac = interpolate.interp(aer['BCEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    du_frac = interpolate.interp(aer['DUEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    oc_frac = interpolate.interp(aer['OCEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    ss_frac = interpolate.interp(aer['SSEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
+    su_frac = interpolate.interp(aer['SUEXTTAU'] , lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
 
     del aer
     del p2
@@ -263,7 +184,6 @@ def array_to_jax_batched(a, batch_size=1000):
             a_flat.append(a[i].astype(np.float32).flatten())
         a_flat = jnp.array(a_flat)
 
-    print(a_flat.shape)
 
     for i in range(0, len(a_flat), batch_size):
         if len(a.shape) == 2:
@@ -273,6 +193,7 @@ def array_to_jax_batched(a, batch_size=1000):
 
     return batch
 
+#@memory_tracker
 def compute_urtoc(Jtoa, Utoa, Jh2o, Uh2o,Jo3, Uo3, Jps, Ups, Jt550, Ut550, Urtoc_ens, Urtoc_rtm_slope, Urtoc_rtm_brdf, Urtoc_rtm_fit, u2_0):
 
     unc_toa = Jtoa*Utoa
@@ -302,8 +223,36 @@ def compute_urtoc(Jtoa, Utoa, Jh2o, Uh2o,Jo3, Uo3, Jps, Ups, Jt550, Ut550, Urtoc
 
     return np.sqrt(sum), (np.abs(unc_h2o), np.abs(unc_o3), np.abs(unc_ps), np.abs(unc_aot))
 
+#@memory_tracker
+def compute_rtm_fit(onnx_file, pression, iaermodel, raa, raa_ir, rtoc, sza, tauaer, vza, vza_ir, wvl):
+    session = ort.InferenceSession(onnx_file)
+    results = np.zeros(rtoc.shape, dtype=np.float32) + np.nan
+    for i, w in enumerate(wvl):
+        filtre = ~np.isnan(pression.values)
+        pre = pression.values[filtre].ravel()
+        iaer = iaermodel.values[filtre].ravel()
+        if i < 2:
+            phi = raa[filtre].ravel()
+            thetav = vza[filtre].ravel()
+        else:
+            phi = raa_ir[filtre].ravel()
+            thetav = vza_ir[filtre].ravel()
+        rsurf = rtoc[i][filtre].ravel()
+        thetas = sza[filtre].ravel()
+        aod = tauaer[filtre].ravel()
+        wave = np.full(pre.shape, w).ravel()
+        x = np.array([pre, iaer, phi, rsurf, thetas, aod, thetav, wave]).T.astype(np.float32)
+        outputs = session.run(None, {'input': x})
+        results[i][filtre] = np.array(outputs[0]).ravel()
+    return np.abs(results)
 
-@memory_tracker
+
+#@memory_tracker
+def run(S, data_batch, iaero):
+    return S.run(data_batch, iaero)
+
+#@memory_tracker
+#def process_batched(data, frac_aer_model, ca_, ca_ind, config_, list_aerosol, batch_size=512):
 def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
     dtype = np.dtype([(k, 'f4') for k in ca_ind.keys()])
     ca2_ = np.ones((ca_.shape[0], ca_.shape[1]), dtype=dtype, order='C')
@@ -315,6 +264,8 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
 
     out = create_nc(config_['output'], (s1,s2), data.attrs['bands'], [], 1.0)
 
+    gc.collect()
+
     for iband, i in enumerate(range(0, s1, batch_size)):
         # bandeau + 1 ligne au-dessus et en-dessous pour éviter les effets de bord
         y_min = max(0,i-1)
@@ -323,20 +274,23 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
         latitude =  data_batch.lat
         longitude = data_batch.lon
         date_time = data_batch["mean-time"]
-        iaer_best = get_iaero(frac_aer_model, latitude.values, [data_batch['SU_FRAC'].values, data_batch['DU_FRAC'].values, data_batch['OC_FRAC'].values, data_batch['SS_FRAC'].values, data_batch['BC_FRAC'].values], config_)
-        iaer_month, mean_totex_month, std_totex_month = calculate_monthly_aerosol(date_time, latitude, longitude)
+#        iaer_best = get_iaero(frac_aer_model, latitude.values, [data_batch['SU_FRAC'].values, data_batch['DU_FRAC'].values, data_batch['OC_FRAC'].values, data_batch['SS_FRAC'].values, data_batch['BC_FRAC'].values], config_)
+#        iaer_original = iaer_best.copy()
+        iaer_best = get_iaer(data_batch)
+#        iaer_month, mean_totex_month, std_totex_month = calculate_monthly_aerosol(date_time, latitude, longitude) #,  list_aerosol)
+        iaer_month = calculate_monthly_aerosol(date_time, latitude, longitude) #,  list_aerosol)
         iaero  = np.zeros((config_['nmodels']+1, iaer_best.shape[0], iaer_best.shape[1]), dtype=np.int32)
         iaero[0] = iaer_best
         iaero[1:] = iaer_month
-        ds_out = S.run(data_batch, iaero)
+#        ds_out = S.run(data_batch, iaero)
+        ds_out = run(S, data_batch, iaero)
         pression = data_batch['SLP'] * config_['k_p0']
-        #slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values/1013., ca_, ca_ind, iaer_month[0])
         slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaer_month[0])
         slope_err = np.maximum(slope_err, -2)
         slope_err = np.minimum(slope_err, 2)
 
-        if config_['debug']:
-            ds_out['iaero'] = (('y','x'), iaer_best)
+#        if config_['debug']:
+        ds_out['iaero'] = (('y','x'), iaer_best)
 
         # suppression des lignes supplémentaires
         if y_min != 0: y_min = 1
@@ -358,16 +312,20 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
         ds_out['slope_err'] = (('bands','y', 'x'), slope_err)
         ds_out['urtoc_terrain'] = (('bands','y', 'x'), urtoc_rtm_slope)
         flag = build_flag(data_batch, ds_out, config)
-#        ds_out['flag'] = (('y','x'), flag)
         ds_out['flag'] = flag
 
-#        urtoc_rtm = np.zeros_like(ds_out['UrTOC_ens'].values)
-#        urtoc_rtm += urtoc_rtm_slope
-        urtoc_rtm_brdf = np.zeros_like(ds_out['UrTOC_ens'].values)
-        urtoc_rtm_fit = np.zeros_like(ds_out['UrTOC_ens'].values)
-#        urtoc_rtm = np.sqrt(urtoc_rtm_slope**2 + urtoc_rtm_brdf**2 + urtoc_rtm_fit**2)
-        ds_out['UrTOC_rtm_fit'] = (('bands', 'y', 'x'), urtoc_rtm_fit)
+        urtoc_rtm_brdf = ds_out['rTOC_0'].values - ds_out['rTOC'].values
         ds_out['UrTOC_rtm_brdf'] = (('bands', 'y', 'x'), urtoc_rtm_brdf)
+        raa = data_batch['SAA'].values - data_batch['VAA'].values
+        raa = raa % 360
+        f = (raa > 180)
+        raa[f] = 360-raa[f]
+        raa_ir = data_batch['SAA'].values - data_batch['VAA_IR'].values
+        raa_ir = raa_ir % 360
+        f = (raa_ir > 180)
+        raa_ir[f] = 360-raa_ir[f]
+        urtoc_rtm_fit = compute_rtm_fit(config_['rmt_fit_file'], data_batch['SLP']*config_['k_p0'], ds_out['iaero'], raa, raa_ir, ds_out['rTOC'].values, data_batch['SZA'].values, data_batch['TOTEXTTAU'].values, data_batch['VZA'].values, data_batch['VZA_IR'].values, data_batch.wavelengths)
+        ds_out['UrTOC_rtm_fit'] = (('bands', 'y', 'x'), urtoc_rtm_fit)
     
         urtoc, unc = compute_urtoc(ds_out['Jrtoa'].values, ds_out['Drtoa'].values, ds_out['Juh2o'].values, ds_out['Duh2o'].values, ds_out['Juo3'].values, ds_out['Duo3'].values, ds_out['Jpre'].values, ds_out['Dpre'].values, ds_out['Jtau550'].values, ds_out['Dtaup'].values, ds_out['UrTOC_ens'].values, urtoc_rtm_slope, urtoc_rtm_brdf, urtoc_rtm_fit, config_['u2_0'])
         ds_out['UrTOC'] = (('bands','y','x'), urtoc)
@@ -378,11 +336,14 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
 
         ds_out = apply_cf_attributes_from_json(ds_out, config_['cf_json_path'])
         data_batch = apply_cf_attributes_from_json(data_batch, config_['cf_json_path'])
-        save_nc_batch(out, data_batch, ds_out, iband, batch_size, config_['jacobian'], config_['debug'])
+        save_nc_batch(out, data_batch, ds_out, iband, batch_size, config_['jacobian']) #, config_['debug'])
+
+        gc.collect()
+
 
     return None, None
 
-@memory_tracker
+#@memory_tracker
 def process_block(data, frac_aer_model, ca_, ca_ind, config, batch_size=128):
     """
     Utilise dask.array.map_blocks pour paralléliser le calcul TOC et jacobians.
@@ -424,15 +385,15 @@ def process_block(data, frac_aer_model, ca_, ca_ind, config, batch_size=128):
     )
     return ds_out
 
-@memory_tracker
+#@memory_tracker
 def save(data, fileout):
     save_nc(data, fileout)
 
-@memory_tracker
-def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, configfile):
+#@memory_tracker
+def process(configfile):
 
     dask.config.set(scheduler='synchronous') 
-    chunks = 512
+#    chunks = 256
     config_ = readConfig(configfile)
     config.set('amip_path', config_['amip_path'])
     coef_path = Path(config_['smaccoef_dir']) / f"{config_['sensor']}_smac_coeffs_v3.0.npy"
@@ -445,8 +406,10 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     config.set('szamax', config_['szamax'])
     config.set('aod_max_grad', config_['aod_max_grad'])
     dirname = config_['input']
-
-    print("probav_folder : ", dirname)
+    merra_aer = config_['merraaero']
+    merra_p2 = config_['merraptwo']
+    aer_file = config_['faer']
+    chunks = config_['chunks_size']
 
     # read ProbaV data
     data = Level1(dirname, 'probav', chunks=chunks)
@@ -455,19 +418,21 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
 
     dir_brdf = config_['brdf_dir']
     date = data['mean-time']
-    k1p, k2p = load_brdf(dir_brdf, date, data['lat'], data['lon'], chunks)
+    nbands = len(data.bands)
+    k1p, k2p = load_brdf(dir_brdf, date, data['lat'], data['lon'], nbands, chunks)
+    k1p.compute()
     data['k1p'] = k1p
     data['k2p'] = k2p
     del k1p
     del k2p
 
     # read DEM
-    demfile = config_['dem']
-    dem = read_dem(demfile, data['lat'], data['lon'], chunks=chunks)
-    data['elev'] = dem['elev']
-    data['Delev'] = dem['Delev']
-    del dem
-    gc.collect()
+#    demfile = config_['dem']
+#    dem = read_dem(demfile, data['lat'], data['lon'], chunks=chunks)
+##    data['den'] = dem['elev'].where(~filtre, other=np.nan)
+#    data['Delev'] = dem['Delev'].where(~filtre, other=np.nan)
+#    del dem
+#    gc.collect()
 
     # read MERRA2
     merra = read_merra(merra_aer, merra_p2, data['lat'], data['lon'], data['mean-time'], chunks)
@@ -478,7 +443,7 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     del merra
 
     # read smac coeffs
-    bandnames = {'band1':'BLUE_TOA', 'band2':'RED_TOA', 'band3':'NIR_TOA', 'band4':'SWIR_TOA'}
+#    bandnames = {'band1':'BLUE_TOA', 'band2':'RED_TOA', 'band3':'NIR_TOA', 'band4':'SWIR_TOA'}
     frac_aer_model = pre_aer_models(aer_file)
 
     smaccoef_dir = config_['smaccoef_dir']
@@ -486,26 +451,26 @@ def process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, 
     smac_coeffs_file = Path(smaccoef_dir)/'{sensor}_{camera}_smac_coeffs_v{version}.npy'.format(sensor=config_['sensor'], camera=data.CAMERA, version=config_['smaccoef_version'])
     ca_, ca_ind = read_smac_coefficients(smac_coeffs_file)
 
-    latitude = data.lat
-    longitude = data.lon
-    date_time = data['mean-time']
-    print("date_time : ", date_time)
     data = data.assign_attrs({'jac_name' : ['Juh2o','Juo3','Jrtoa','Jpre','Drsurf']})
     data = data.chunk({'y':chunks, 'x':chunks, 'bands':-1})
-    toc,  jac = process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=64)
+
+    print("#### date ####", date.values, type(date))
+    toc,  jac = process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=chunks)
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) != 9:
-        print("Usage: python process.py <dirname> <demfile> <merra_aer> <merra_p2> <smac_dir> <aer_file> <fileout> <configfile>")
+    if len(sys.argv) != 2:
+#        print("Usage: python process.py <dirname> <demfile> <merra_aer> <merra_p2> <smac_dir> <aer_file> <fileout> <configfile>")
+        print("Usage: python process.py <configfile>")
         exit(1)
     print()
-    dirname = sys.argv[1]
-    demfile = sys.argv[2]
-    merra_aer = sys.argv[3]
-    merra_p2 = sys.argv[4]
-    smac_dir = sys.argv[5]
-    aer_file = sys.argv[6]
-    fileout = sys.argv[7]
-    configfile = sys.argv[8]
-    process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, configfile)
+#    dirname = sys.argv[1]
+#    demfile = sys.argv[2]
+#    merra_aer = sys.argv[3]
+#    merra_p2 = sys.argv[4]
+#    smac_dir = sys.argv[5]
+#    aer_file = sys.argv[6]
+#    fileout = sys.argv[7]
+    configfile = sys.argv[1]
+#    process(dirname, demfile, merra_aer, merra_p2, smac_dir, aer_file, fileout, configfile)
+    process(configfile)

@@ -1,12 +1,18 @@
 import xarray as xr
 import numpy as np
 from pathlib import Path
-import xdem
+import xdem.terrain as xdem_terrain
 #import config
 import probav_vito as probav
 from core.interpolate import interp, Linear
 from core.tools import xrcrop
 from scipy.signal import convolve2d
+import logging
+import datetime
+import functools
+import psutil
+import os
+from time import time
 
 class config_class:
     def __init__(self):
@@ -21,6 +27,78 @@ class config_class:
 
 
 config = config_class()
+
+def setup_logger():
+    """Configure le logger avec un format plus détaillé"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(levelname)s | %(message)s',
+        handlers=[
+            logging.FileHandler(f'memory_usage_{datetime.datetime.now():%Y%m%d_%H%M}.log'),
+            logging.StreamHandler()
+        ]
+    )
+
+def memory_tracker(func):
+    """Décorateur pour suivre l'utilisation de la mémoire d'une fonction"""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        pc = psutil.Process(os.getpid())
+        
+        # Mesure avant exécution
+        mem_before = pc.memory_info().rss / 1024 / 1024  # En MB
+        start_time = time()
+        peak_memory = mem_before
+        
+        # Fonction pour mesurer la mémoire pendant l'exécution
+        def get_current_memory():
+            return pc.memory_info().rss / 1024 / 1024
+        
+        try:
+            # Exécution de la fonction
+            result = func(*args, **kwargs)
+            
+            # Mesure finale
+            peak_memory = max(peak_memory, get_current_memory())
+            end_time = time()
+            mem_after = get_current_memory()
+            
+            # Calcul des différences
+            duration = end_time - start_time
+            mem_diff = mem_after - mem_before
+            
+            logging.info(
+                f"\n{'='*50}\n"
+                f"Function: {func.__name__}\n"
+                f"Memory before: {mem_before:,.2f} MB\n"
+                f"Memory after: {mem_after:,.2f} MB\n"
+                f"Peak memory: {peak_memory:,.2f} MB\n"
+                f"Memory used: {mem_diff:,.2f} MB\n"
+                f"Duration: {duration:.2f} seconds\n"
+                f"{'='*50}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            # En cas d'erreur, on log quand même l'utilisation mémoire
+            end_time = time()
+            mem_after = get_current_memory()
+            peak_memory = max(peak_memory, mem_after)
+            
+            logging.error(
+                f"\n{'='*50}\n"
+                f"Function: {func.__name__} (FAILED)\n"
+                f"Error: {str(e)}\n"
+                f"Memory before: {mem_before:,.2f} MB\n"
+                f"Memory after: {mem_after:,.2f} MB\n"
+                f"Peak memory: {peak_memory:,.2f} MB\n"
+                f"Duration: {end_time - start_time:.2f} seconds\n"
+                f"{'='*50}"
+            )
+            raise
+            
+    return wrapper
 
 def build_flag(ds_input, ds_output, config_data):
 #    flag_aot = ds_input.rtoa.max(dim="bands") >= config_data.getfloat("Coefficients", "aotmax")
@@ -334,44 +412,71 @@ def closest_model(image_data, lut_data):
     # distance compute https://www.mdpi.com/2227-7390/12/23/3787 3.2.5. Parallelization as of 21/07/2025
     pixels = image_data.T 
     lut = lut_data  
-
     lut_norms = np.sum(lut.T ** 2, axis=1) 
     pixel_norms = np.sum(pixels ** 2, axis=1)[:, np.newaxis] 
-    dot_products = pixels @ lut 
+    dot_products = pixels @ lut
     distances = pixel_norms + lut_norms - 2 * dot_products 
     
     indices = np.argmin(distances, axis=1).astype(np.uint8)
 
     return indices
 
-#def closest_model_low(image_data, lut_data):
-#    pixels = image_data.T 
-#    indices = np.zeros((pixels.shape[0],), dtype=np.uint8)
-#    i_min = np.zeros((pixels.shape[0],), dtype=np.float32)+1e10
-#    for i in range(lut_data.shape[1]):
-#        lut = lut_data[:, i]  
-#        lut_norms = np.sum(lut ** 2, axis=0) 
-#        dot_products = pixels @ lut 
-#        pixel_norms = np.sum(pixels **2, axis=1)
-#        distances = pixel_norms + lut_norms - 2 * dot_products 
-#        i_min = np.minimum(i_min, distances)
-#        f = np.where(i_min == distances)
-#        indices[f] = i
-#
-#    return indices
+def closest_model_optimized(image_data, lut_data):
+    pixels = image_data.T 
+    lut = lut_data  
+    lut_norms = np.sum(lut.T ** 2, axis=1) 
+#    pixel_norms = np.sum(pixels ** 2, axis=1)[:, np.newaxis] 
+    dot_products = pixels @ lut
+    distances = lut_norms - 2 * dot_products 
+    
+    indices = np.argmin(distances, axis=1).astype(np.uint8)
+
+    return indices
+
+def closest_model_pixelwise(image_data, lut_data):
+    pixels = image_data.T 
+#    lut = lut_data.astype(np.float32)
+    lut_norms = np.sum(lut_data.T ** 2, axis=1) 
+    nb_pixels = pixels.shape[0]
+    indices = np.zeros((nb_pixels), dtype=np.uint8)
+    for i in range(nb_pixels):
+        pixel = pixels[i]
+        pixel_norm = np.sum(pixel ** 2).astype(np.float32)
+        dot_products = pixel @ lut_data
+        distances = pixel_norm + lut_norms - 2 * dot_products 
+        indices[i] = np.argmin(distances).astype(np.uint8)
+
+    return indices
+
+def closest_model_low(image_data, lut_data):
+    pixels = image_data.T 
+    indices = np.zeros((pixels.shape[0],), dtype=np.uint8)
+    i_min = np.zeros((pixels.shape[0],), dtype=np.float32)+1e10
+    for i in range(lut_data.shape[1]):
+        lut = lut_data[:, i]  
+        lut_norms = np.sum(lut ** 2, axis=0) 
+        dot_products = pixels @ lut 
+        pixel_norms = np.sum(pixels **2, axis=1)
+        distances = pixel_norms + lut_norms - 2 * dot_products 
+        i_min = np.minimum(i_min, distances)
+        f = np.where(i_min == distances)
+        indices[f] = i
+
+    return indices
 
 def get_aer_interpolated(dsAER: xr.Dataset, latitude, longitude, date_time=None) -> xr.Dataset:
     """
     Interpolate aerosol data to specified coordinates and time.
     """
-    vars_ = ["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]
+#    vars_ = ["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]
+    vars_ = ["TOTEXTTAU", "SU_FRAC", "DU_FRAC", "OC_FRAC", "SS_FRAC", "BC_FRAC"]
     interp_kwargs = {'lat': latitude, 'lon': longitude}
     if date_time is not None:
         interp_kwargs['time'] = date_time
 
     interp_vars = {}
     for v in vars_:
-        interp_vars[v] = interp(dsAER[v], **interp_kwargs)
+        interp_vars[v] = interp(dsAER[v].astype(np.float32), **interp_kwargs).astype(np.float32)
     return xr.Dataset(interp_vars)
 
 def pre_aer_models(faer, match):
@@ -396,10 +501,9 @@ def get_iaer(data):
     """
     faer = config.aerosol_model_fraction
     match = {'sulf': 'SU', 'dust': 'DU', 'oc': 'OC', 'ssalt': 'SS', 'bc': 'BC'}
-    match2 = {'sulf': 'SUEXTTAU', 'dust': 'DUEXTTAU', 
-              'oc': 'OCEXTTAU', 'ssalt': 'SSEXTTAU', 
-              'bc': 'BCEXTTAU'}
-    
+    match2 = {'sulf': 'SU_FRAC', 'dust': 'DU_FRAC',
+              'oc': 'OC_FRAC', 'ssalt': 'SS_FRAC', 
+              'bc': 'BC_FRAC'}
     # Load aerosol models
     frac_aer_model, rh_aer_model, Ha_aer_model = pre_aer_models(faer, match)
     # Get shape and flatten TOTEXTTAU once
@@ -417,8 +521,8 @@ def get_iaer(data):
     # Stack xb
     xb = np.stack([frac_aer_model[key] for key in keys_list], axis=0, dtype=np.float32)
     # Find closest model
-    result = closest_model(xm, xb).reshape(shp)
-#    result = closest_model_low(xm, xb).reshape(shp)
+#    result = closest_model(xm, xb).reshape(shp)
+    result = closest_model_low(xm, xb).reshape(shp)
     
     return result
 
@@ -435,6 +539,22 @@ def get_mensual_faers(date):
 #date_time = dsProbav["mean-time"]
 # latitude = dsProbav.lat
 # longitude = dsProbav.lon
+
+def open_monthly_aerosol(date_time):
+    print("Loading monthly aerosol data...")
+    if int(str(date_time.values)[:4]) <= 2017:
+        date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
+    else:
+        date = "2017"+str(date_time.values)[5:7]
+    dsMensualAERs = []
+    for aer_path in get_mensual_faers(date): 
+        dsMensualAER = xr.open_dataset(aer_path, chunks={"lat" : -1, "lon" : -1, "time" : 1})
+        dsMensualAER = dsMensualAER[["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", 
+                                     "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]].astype(np.float32)
+        dsMensualAERs.append(dsMensualAER)
+    return dsMensualAERs
+
+#@memory_tracker
 def calculate_monthly_aerosol(
     date_time, 
     latitude, 
@@ -444,14 +564,18 @@ def calculate_monthly_aerosol(
     print("Loading monthly aerosol data...")
     
     dsMensualAERs = []
-    # get_mensual_faers is assumed to return a list of file paths
-    date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
+   # giet_mensual_faers is assumed to return a list of file paths
+    if int(str(date_time.values)[:4]) <= 2017:
+        date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
+    else:
+        date = "2017"+str(date_time.values)[5:7]
     for aer_path in get_mensual_faers(date): 
-        # Open and compute the data for the monthly draw
+       # Open and compute the data for the monthly draw
         dsMensualAER = xr.open_dataset(aer_path, chunks={"lat" : -1, "lon" : -1, "time" : 1})
-        # Select and compute the necessary TOTEXTTAU and its components
+       # Select and compute the necessary TOTEXTTAU and its components
         dsMensualAER = dsMensualAER[["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", 
-                                     "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]].compute().astype(np.float32)
+                                     "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]].astype(np.float32)
+        dsMensualAER = dsMensualAER.rename({"BCEXTTAU":"BC_FRAC", "DUEXTTAU":"DU_FRAC","SSEXTTAU":"SS_FRAC","OCEXTTAU":"OC_FRAC","SUEXTTAU":"SU_FRAC"})
 
         # Interpolate the aerosol data to the observation's geometry
         mensual_faer = get_aer_interpolated(
@@ -459,7 +583,8 @@ def calculate_monthly_aerosol(
             Linear(latitude), 
             Linear(longitude), 
             None # Time interpolation is not used here for monthly data
-        ).transpose()
+        ) #.transpose()
+        
         
         dsMensualAERs.append(mensual_faer.squeeze())
         
@@ -468,46 +593,40 @@ def calculate_monthly_aerosol(
     dsMensualAERs = dsMensualAERs.assign_coords(tirage=np.arange(10))
     
     mensual_iaer = get_iaer(dsMensualAERs)
-    # Extract the total AOD for statistics
-    totexttau_mensu = dsMensualAERs.TOTEXTTAU
-    
-    # Calculate the required statistics: means_tottextau_amip and std_devs_tottextau_amip
-    means_tottextau_amip = totexttau_mensu.mean(dim="tirage").data.astype(np.float32)
-    std_devs_tottextau_amip = totexttau_mensu.std(dim="tirage").data.astype(np.float32)
 
-    
-
-    return mensual_iaer, means_tottextau_amip.compute(), std_devs_tottextau_amip.compute()
+    return mensual_iaer 
 
 def _load_or_compute_terrain(latitude, longitude, dsDEM):
     """Load cached terrain data or compute if not available."""
-    file_name = Path(config.kept_data_path) / "slope" / \
-                f"{str(latitude.y[0].values)[:10]}_{str(longitude.x[0].values)[:10]}_slope.nc"
-    
+#    file_name = Path(config.kept_data_path) / "slope" / \
+#                f"{str(latitude.y[0].values)[:10]}_{str(longitude.x[0].values)[:10]}_slope.nc"
+#    
 #    if file_name.exists():
 #        return xr.open_dataset(file_name).chunk({"y" : longitude.chunksizes['y'][0], "x" : longitude.chunksizes['x'][0]})
     
     # Compute terrain data
-    file_name.parent.mkdir(parents=True, exist_ok=True)
+#    file_name.parent.mkdir(parents=True, exist_ok=True)
     
     elev = interp(dsDEM["elev"], lat=Linear(latitude), lon=Linear(longitude))
     delev = interp(dsDEM["Delev"], lat=Linear(latitude), lon=Linear(longitude))
-    slope = xdem.terrain.slope(elev.values, resolution=10)
-    aspect = xdem.terrain.aspect(elev.values)
+    slope = xdem_terrain.slope(elev.values, resolution=10)
+    aspect = xdem_terrain.aspect(elev.values)
     slope = slope.astype(np.float32)
     aspect = aspect.astype(np.float32)
     
     # Cache results
     terrain_ds = xr.Dataset(
         {
-            "elev": (["y", "x"], elev.transpose().data.astype(np.float32)),
-            "delev": (["y", "x"], delev.transpose().data.astype(np.float32)),
-            "slope": (["y", "x"], slope.T),
-            "aspect": (["y", "x"], aspect.T),
+#            "elev": (["y", "x"], elev.transpose().data.astype(np.float32)),
+#            "delev": (["y", "x"], delev.transpose().data.astype(np.float32)),
+            "elev": (["y", "x"], elev.data.astype(np.float32)),
+            "delev": (["y", "x"], delev.data.astype(np.float32)),
+            "slope": (["y", "x"], slope),
+            "aspect": (["y", "x"], aspect),
         },
         coords={"y": elev.y, "x": elev.x}
     )
-    terrain_ds.to_netcdf(file_name)
+    #terrain_ds.to_netcdf(file_name)
     
     return terrain_ds
 
@@ -569,13 +688,14 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
 
     return np.array(slope_errs)
 
+#@memory_tracker
 def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer):
     dsDEM = xrcrop(xr.open_dataset(config.dem_path, chunks="auto"), lat = ds_probav.y).chunk({"lat" : 300, "lon" : 300})
     dsDEM = dsDEM.compute()
     terrain_data = _load_or_compute_terrain(ds_probav.lat, ds_probav.lon, dsDEM)
 
-    elev = terrain_data["elev"]
-    delev = terrain_data["delev"]
+#    elev = terrain_data["elev"]
+#    delev = terrain_data["delev"]
     slope = terrain_data["slope"]
     aspect = terrain_data["aspect"]
     
