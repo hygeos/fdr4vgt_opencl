@@ -13,6 +13,7 @@ import functools
 import psutil
 import os
 from time import time
+import gc
 
 class config_class:
     def __init__(self):
@@ -522,7 +523,7 @@ def get_iaer(data):
     xb = np.stack([frac_aer_model[key] for key in keys_list], axis=0, dtype=np.float32)
     # Find closest model
 #    result = closest_model(xm, xb).reshape(shp)
-    result = closest_model_low(xm, xb).reshape(shp)
+    result = closest_model_low(xm, xb).reshape(shp) #.astype(np.float32)
     
     return result
 
@@ -563,7 +564,8 @@ def calculate_monthly_aerosol(
 
     print("Loading monthly aerosol data...")
     
-    dsMensualAERs = []
+#    dsMensualAERs = []
+    mensual_iaer = None
    # giet_mensual_faers is assumed to return a list of file paths
     if int(str(date_time.values)[:4]) <= 2017:
         date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
@@ -585,14 +587,19 @@ def calculate_monthly_aerosol(
             None # Time interpolation is not used here for monthly data
         ) #.transpose()
         
-        
-        dsMensualAERs.append(mensual_faer.squeeze())
+        mensual_faer = get_iaer(mensual_faer)
+        if mensual_iaer is None: 
+            mensual_iaer = mensual_faer
+        else:
+            mensual_iaer = np.concatenate([mensual_iaer, mensual_faer], axis=0)
+#        dsMensualAERs.append(mensual_faer.squeeze())
+        gc.collect()
         
     # Combine all monthly draws into a single dataset with a 'tirage' dimension
-    dsMensualAERs = xr.concat(dsMensualAERs, dim="tirage").drop_vars("time").astype(np.float32)
-    dsMensualAERs = dsMensualAERs.assign_coords(tirage=np.arange(10))
+#    dsMensualAERs = xr.concat(dsMensualAERs, dim="tirage").drop_vars("time").astype(np.float32)
+#    dsMensualAERs = dsMensualAERs.assign_coords(tirage=np.arange(10))
     
-    mensual_iaer = get_iaer(dsMensualAERs)
+#    mensual_iaer = get_iaer(dsMensualAERs)
 
     return mensual_iaer 
 

@@ -263,6 +263,9 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
     S = ISmaccl(config_, frac_aer_model, ca2_, platform='CPU', XBLOCK=batch_size, XGRID=batch_size, breakpoint=False)
 
     out = create_nc(config_['output'], (s1,s2), data.attrs['bands'], [], 1.0)
+    latitude = data.lat
+    longitude = data.lon
+    date_time = data["mean-time"]
 
     gc.collect()
 
@@ -282,6 +285,7 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
         iaero  = np.zeros((config_['nmodels']+1, iaer_best.shape[0], iaer_best.shape[1]), dtype=np.int32)
         iaero[0] = iaer_best
         iaero[1:] = iaer_month
+#        iaero[1:] = data_batch['iaer_month']
 #        ds_out = S.run(data_batch, iaero)
         ds_out = run(S, data_batch, iaero)
         pression = data_batch['SLP'] * config_['k_p0']
