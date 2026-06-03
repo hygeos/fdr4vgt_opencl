@@ -1,4 +1,5 @@
 from probav_vito import Level1_probav
+from fdr4vgt.spotvgt_vito import Level1_spotvgt
 import xarray as xa
 from datetime import date, datetime
 from netCDF4 import Dataset
@@ -116,14 +117,14 @@ def load_brdf(dirname, date, lat, lon, nbands, chunks):
 
     return k1p, k2p
 
-def Level1(input, sensor, chunks=None):
+def Level1(input, sensor, smac_dir, version,chunks=None):
     '''
     Read a Level1 product as an xarray.Dataset
     '''
 
-    func = {'probav': Level1_probav}
+    func = {'PROBA-V': Level1_probav, 'SPOTVGT1': Level1_spotvgt, 'SPOTVGT2': Level1_spotvgt}
     
-    ds = func[sensor](input, chunks)
+    ds = func[sensor](input, smac_dir, version, sensor, chunks)
 
     return ds   
 
@@ -165,6 +166,8 @@ def create_nc(filename, gl_size, bands, attrs, version):
 #        'bands': ','.join(bands)
 #    })
 
+    out.close()
+
     return out
 
 def attrs_corr(attr):
@@ -179,13 +182,19 @@ def attrs_corr(attr):
     return attr
 
 #@memory_tracker
-def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False): #, debug=False):  
+#def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False): #, debug=False):  
+def save_nc_batch(filename, ds_in, ds_out, iband, jband, band_size, error=False): 
     '''
     Save a batch of data to a NetCDF file.
     out : pointer to the netCDF4 Dataset
     ds_in : xarray.Dataset containing input datk
     ds_out : xarray.Dataset containing output data
-    ''' 
+    '''
+
+    out = Dataset(filename, 'a', format='NETCDF4')
+
+    x_start = jband * band_size
+    x_end = min(x_start + band_size, out.dimensions['width'].size)
     y_start = iband * band_size
     y_end = min(y_start + band_size, out.dimensions['height'].size)
 
@@ -215,7 +224,8 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False): #, debug=F
                 out.createVariable(var, dtype, ('height','width'), zlib=True, complevel=4)
                 existing_attrs = ds_in[var].attrs if hasattr(ds_in[var], 'attrs') else {}
                 out[var].setncatts({**existing_attrs})
-            out.variables[var][y_start:y_end,:] = ds_in[var].values
+#            out.variables[var][y_start:y_end,:] = ds_in[var].values
+            out.variables[var][y_start:y_end,x_start:x_end] = ds_in[var].values
 
     for var_out, var_in in list_vars_out.items():
         if len(ds_out[var_in].dims) == 3:
@@ -227,14 +237,16 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False): #, debug=F
                     out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=4)
                     existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
                     out[var_out_band].setncatts({**existing_attrs})
-                out.variables[var_out_band][y_start:y_end, :] = ds_out[var_in][ib, :, :].values
+#                out.variables[var_out_band][y_start:y_end, :] = ds_out[var_in][ib, :, :].values
+                out.variables[var_out_band][y_start:y_end, x_start:x_end] = ds_out[var_in][ib, :, :].values
         elif len(ds_out[var_in].dims) == 2:
             if var_out not in existing_vars:
                 dtype = ds_out[var_in].dtype
                 out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=4)
                 existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
                 out[var_out].setncatts({**existing_attrs})
-            out.variables[var_out][y_start:y_end, :] = ds_out[var_in].values
+#            out.variables[var_out][y_start:y_end, :] = ds_out[var_in].values
+            out.variables[var_out][y_start:y_end, x_start:x_end] = ds_out[var_in].values
 
 
     for var_out, var_in in list_vars_in.items():
@@ -246,7 +258,8 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False): #, debug=F
                     out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=4)
                     existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}
                     out[var_out_band].setncatts({**existing_attrs})
-                out.variables[var_out_band][y_start:y_end, :] = ds_in[var_in][ib, :, :].values
+#                out.variables[var_out_band][y_start:y_end, :] = ds_in[var_in][ib, :, :].values
+                out.variables[var_out_band][y_start:y_end, x_start:x_end] = ds_in[var_in][ib, :, :].values
         elif len(ds_in[var_in].dims) == 2:
             if var_out not in existing_vars:
                 dtype = ds_in[var_in].dtype
@@ -254,7 +267,9 @@ def save_nc_batch(out, ds_in, ds_out, iband, band_size, error=False): #, debug=F
                 existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}
                 existing_attrs = attrs_corr(existing_attrs)
                 out[var_out].setncatts({**existing_attrs})
-            out.variables[var_out][y_start:y_end, :] = ds_in[var_in].values
+#            out.variables[var_out][y_start:y_end, :] = ds_in[var_in].values
+            out.variables[var_out][y_start:y_end, x_start:x_end] = ds_in[var_in].values
+    out.close()
 
 def save_nc(ds, filename):
     '''

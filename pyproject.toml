@@ -6,8 +6,8 @@ authors = [{name = "HYGEOS", email = "contact@hygeos.com"}]
 dependencies = ['xarray',
                 'netcdf4',
                 'dask',
-                "core @ git+https://github.com/hygeos/core.git",
-                "harp @ git+https://github.com/hygeos/harp.git",
+                "core @ git+https://github.com/hygeos/core.git#a51bc9dbe7f74fe1e280d21571e8018dc65abb6b",
+#                "harp @ git+https://github.com/hygeos/harp.git",
                 ]
 [build-system]
 requires = ["setuptools>=42"]

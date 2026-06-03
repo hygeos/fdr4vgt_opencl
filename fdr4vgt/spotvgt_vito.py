@@ -13,26 +13,27 @@ def date_to_float(d, epoch=np.datetime64('1980-01-01T00:00:00.000000000')):
     
     return (d - epoch).astype(np.float64)/1.0e9/60.
 
-def Level1_probav(dirname,
+def Level1_spotvgt(dirname,
                 smac_dir,
                 version,
                 sensor,
                 chunks=None,
                 ):
     '''
-    Read an ProbaV Level1 product as an xarray.Dataset
+    Read an SpotVGT Level1 product as an xarray.Dataset
     '''
 
-    ds = read_ProbaV(dirname,
-                     smac_dir,
-                     version,
-                     chunks
+    ds = read_spotvgt(dirname,
+                    smac_dir,
+                    version,
+                    sensor,
+                    chunks
                     )
     return ds
 
-def read_ProbaV_variable(filename, chunks):
+def read_spotvgt_variable(filename, chunks):
     '''
-    Read a variable from a ProbaV Level1 product.
+    Read a variable from a SpotVGT Level1 product.
     '''
     src = xr.open_dataset(filename, chunks=chunks)
     varname = list(src.variables.keys())
@@ -53,13 +54,13 @@ def read_ProbaV_variable(filename, chunks):
 
     return data
 
-def read_ProbaV_geometry(dirname, 
+def read_spotvgt_geometry(dirname, 
                          chunks,
     #                     kind='vis', 
                          ):
     '''
-    Read the geometry of a ProbaV Level1 product.
-    dirname : str, path to the directory containing the ProbaV data.
+    Read the geometry of a SpotVGT Level1 product.
+    dirname : str, path to the directory containing the SpotVGT data.
     kind : str, type of data to read ('vis' or 'swir')
     chunks : int, size of the chunks to use for reading the data.
     '''
@@ -83,7 +84,7 @@ def read_ProbaV_geometry(dirname,
                 name = '{}_{}'.format(angle, f.split('_')[-2])
             else:
                 name = angle
-            ds[name] = read_ProbaV_variable(f, chunks).astype('float32') 
+            ds[name] = read_spotvgt_variable(f, chunks).astype('float32') 
 
     return ds
 
@@ -101,19 +102,20 @@ def set_latlon(mapping, sizes, start=0):
 
     return lat, lon
 
-def read_ProbaV(dirname,
+def read_spotvgt(dirname,
                 smac_dir,
                 version,
-                 chunks,
+                sensor,
+                chunks
                  ):
     '''
-    Read an ProbaV Level1 product as an xarray
+    Read an SpotVGT Level1 product as an xarray
     '''
 
 
     # read geometries
     print("reading geometries...")
-    angles = read_ProbaV_geometry(dirname, chunks) #, kind='vis')
+    angles = read_spotvgt_geometry(dirname, chunks) #, kind='vis')
 #    angles_swir = read_ProbaV_geometry(dirname, chunks, kind='swir')
 
     # read cloud, lat and lon
@@ -121,13 +123,13 @@ def read_ProbaV(dirname,
     filename = glob(dirname+'/*CLOUD_PROBABILITY*.hdf*')
     assert(len(filename)==1)
     filename = filename[0]
-    cam = {'1':'LEFT', '2':'CENTER', '3':'RIGHT'}
+#    cam = {'1':'LEFT', '2':'CENTER', '3':'RIGHT'}
     date = basename(filename).split('_')[2]
     date = '{}-{}-{}'.format(date[:4], date[4:6], date[6:8])
     hour = basename(filename).split('_')[3]
     hour = '{}:{}:{}'.format(hour[:2], hour[2:4], hour[4:6])
     dt = np.datetime64('{}T{}'.format(date, hour))
-    camera = cam[basename(filename).split('_')[4]]
+#    camera = cam[basename(filename).split('_')[4]]
     src = xr.open_dataset(filename, chunks=chunks)
 #    cloud = src['SM_SHD']
     cloud = src['CLOUD_PROBABILITY']
@@ -156,7 +158,7 @@ def read_ProbaV(dirname,
             filename = glob('{}/*{}_{}*.hdf*'.format(dirname, c, p))
             assert(len(filename)==1)
             filename = filename[0]
-            toa = read_ProbaV_variable(filename, chunks) 
+            toa = read_spotvgt_variable(filename, chunks) 
            # name = '{}_{}'.format(b, p.lower())
             ds[p][i] = toa.data.astype('float32')
 
@@ -170,18 +172,18 @@ def read_ProbaV(dirname,
     filename = glob(dirname+'/*SM*.hdf*')
     assert(len(filename)==1)
     filename = filename[0]
-    sm = read_ProbaV_variable(filename, chunks)
+    sm = read_spotvgt_variable(filename, chunks)
     ds['SM_MAP'] = (['y','x'], sm.data.astype('uint8'))
     # dem
     filename = glob(dirname+'/*_DEM*.hdf*')
     if len(filename)==1:
         filename = filename[0]
-        dem = read_ProbaV_variable(filename, chunks)
+        dem = read_spotvgt_variable(filename, chunks)
         dem = dem.where(~filtre, np.nan)
         ds['elev'] = (['y','x'], dem.data.astype('float32'))
         ds['Delev'] = (['y','x'], np.zeros_like(dem.data, dtype='float32').astype('float32')) 
 
-    smac_coeffs_file = Path(smac_dir)/'PROBA-V_{camera}_smac_coeffs_v{version}.npy'.format(camera=camera, version=version)
+    smac_coeffs_file = Path(smac_dir)/'VGT{}_smac_coeffs_v{version}.npy'.format(sensor[-1],version=version)
 #    filename = glob(dirname+'/*_DELTADEM*.hdf*')
 #    if len(filename)==1:
 #        filename = filename[0]
@@ -191,7 +193,7 @@ def read_ProbaV(dirname,
 
     ds['mean-time'] = dt
     ds['mean-time-dec'] = date_to_float(dt)
-    attributs = {'CAMERA':camera, "bands": bandnames, 'sensor':'Proba-V', 'wavelengths': [.463, .655, .865, 1.600], 'smac_coeffs_file': smac_coeffs_file} #, 'mean-time': dt, 'mean-time-dec': date_to_float(dt)}
+    attributs = {"bands": bandnames, 'sensor':'spotvgt1', 'wavelengths': [.463, .655, .865, 1.600], 'smac_coeffs_file': smac_coeffs_file} #, 'mean-time': dt, 'mean-time-dec': date_to_float(dt)}
     ds = ds.assign_attrs(attributs)
     ds = ds.chunk({'y':chunks, 'x':chunks, 'bands':-1})
 

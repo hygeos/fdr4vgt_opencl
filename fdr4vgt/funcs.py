@@ -455,10 +455,11 @@ def closest_model_low(image_data, lut_data):
     i_min = np.zeros((pixels.shape[0],), dtype=np.float32)+1e10
     for i in range(lut_data.shape[1]):
         lut = lut_data[:, i]  
-        lut_norms = np.sum(lut ** 2, axis=0) 
-        dot_products = pixels @ lut 
-        pixel_norms = np.sum(pixels **2, axis=1)
-        distances = pixel_norms + lut_norms - 2 * dot_products 
+#        lut_norms = np.sum(lut ** 2, axis=0) 
+#        dot_products = pixels @ lut 
+#        pixel_norms = np.sum(pixels **2, axis=1)
+#        distances = pixel_norms + lut_norms - 2 * dot_products 
+        distances = np.sum((pixels - lut) ** 2, axis=1)
         i_min = np.minimum(i_min, distances)
         f = np.where(i_min == distances)
         indices[f] = i
@@ -491,7 +492,7 @@ def pre_aer_models(faer, match):
     for key in match.keys():
         f.readline()
         line = f.readline()
-        frac_aer_model[key] = np.array(line.split()).astype(float)
+        frac_aer_model[key] = np.array(line.split()).astype(np.float32)
     f.close()
 
     return frac_aer_model, rh, Ha
@@ -524,6 +525,7 @@ def get_iaer(data):
     # Find closest model
 #    result = closest_model(xm, xb).reshape(shp)
     result = closest_model_low(xm, xb).reshape(shp) #.astype(np.float32)
+#    result = closest_model_pixelwise(xm, xb).reshape(shp) #.astype(np.float32)
     
     return result
 
@@ -571,6 +573,7 @@ def calculate_monthly_aerosol(
         date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
     else:
         date = "2017"+str(date_time.values)[5:7]
+    date = '201411'
     for aer_path in get_mensual_faers(date): 
        # Open and compute the data for the monthly draw
         dsMensualAER = xr.open_dataset(aer_path, chunks={"lat" : -1, "lon" : -1, "time" : 1})
@@ -581,7 +584,7 @@ def calculate_monthly_aerosol(
 
         # Interpolate the aerosol data to the observation's geometry
         mensual_faer = get_aer_interpolated(
-            dsMensualAER, 
+            dsMensualAER.compute(), 
             Linear(latitude), 
             Linear(longitude), 
             None # Time interpolation is not used here for monthly data
@@ -593,7 +596,7 @@ def calculate_monthly_aerosol(
         else:
             mensual_iaer = np.concatenate([mensual_iaer, mensual_faer], axis=0)
 #        dsMensualAERs.append(mensual_faer.squeeze())
-        gc.collect()
+#        gc.collect()
         
     # Combine all monthly draws into a single dataset with a 'tirage' dimension
 #    dsMensualAERs = xr.concat(dsMensualAERs, dim="tirage").drop_vars("time").astype(np.float32)
@@ -644,9 +647,9 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
     """
     Calculate error from terrain slope and aspect.
     """
-    mtetas = ds.SZA.data.astype(np.float32).ravel().compute()
-    mtetav = _stack_viewing_angles(ds.VZA.data,ds.VZA_IR.data).reshape(len(ds.attrs["bands"]), -1).compute()
-    mphis = ds.SAA.data.astype(np.float32).ravel().compute()
+    mtetas = ds.SZA.data.astype(np.float32).ravel()#.compute()
+    mtetav = _stack_viewing_angles(ds.VZA.data,ds.VZA_IR.data).reshape(len(ds.attrs["bands"]), -1)#.compute()
+    mphis = ds.SAA.data.astype(np.float32).ravel()#.compute()
     maspect = aspect.data.ravel()#.compute()
     mslope = slope.data.ravel()#.compute()
     mpression = pression.ravel()
@@ -696,8 +699,8 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
     return np.array(slope_errs)
 
 #@memory_tracker
-def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer):
-    dsDEM = xrcrop(xr.open_dataset(config.dem_path, chunks="auto"), lat = ds_probav.y).chunk({"lat" : 300, "lon" : 300})
+def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize):
+    dsDEM = xrcrop(xr.open_dataset(config.dem_path, chunks="auto"), lat = ds_probav.y).chunk({"lat" : chunksize, "lon" : chunksize})
     dsDEM = dsDEM.compute()
     terrain_data = _load_or_compute_terrain(ds_probav.lat, ds_probav.lon, dsDEM)
 
@@ -705,7 +708,7 @@ def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer):
 #    delev = terrain_data["delev"]
     slope = terrain_data["slope"]
     aspect = terrain_data["aspect"]
-    
+
     return slope_err(ds_probav, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer)
 
 def convolution_err(input_data: np.ndarray, size: int = 5, sigma: float = 0.9) -> np.ndarray:

@@ -11,7 +11,7 @@ from pathlib import Path
 #from tempfile import TemporaryDirectory
 import dask.array as da
 #from lib.jsmac_lib_dev import read_smac_coefficients, smac_neo
-import jax.numpy as jnp
+#import jax.numpy as jnp
 from time import time
 #import datetime
 import gc
@@ -267,82 +267,102 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
     longitude = data.lon
     date_time = data["mean-time"]
 
+#    iaer_month = calculate_monthly_aerosol(date_time, latitude, longitude) #,  list_aerosol)
+#    data['iaer_month'] = (['naero','y','x'], iaer_month.astype(np.uint32))
+
     gc.collect()
 
     for iband, i in enumerate(range(0, s1, batch_size)):
         # bandeau + 1 ligne au-dessus et en-dessous pour éviter les effets de bord
         y_min = max(0,i-1)
         y_max = min(s1, i + batch_size +1)
-        data_batch = data.isel(y=slice(y_min, y_max))
-        latitude =  data_batch.lat
-        longitude = data_batch.lon
-        date_time = data_batch["mean-time"]
-#        iaer_best = get_iaero(frac_aer_model, latitude.values, [data_batch['SU_FRAC'].values, data_batch['DU_FRAC'].values, data_batch['OC_FRAC'].values, data_batch['SS_FRAC'].values, data_batch['BC_FRAC'].values], config_)
-#        iaer_original = iaer_best.copy()
-        iaer_best = get_iaer(data_batch)
-#        iaer_month, mean_totex_month, std_totex_month = calculate_monthly_aerosol(date_time, latitude, longitude) #,  list_aerosol)
-        iaer_month = calculate_monthly_aerosol(date_time, latitude, longitude) #,  list_aerosol)
-        iaero  = np.zeros((config_['nmodels']+1, iaer_best.shape[0], iaer_best.shape[1]), dtype=np.int32)
-        iaero[0] = iaer_best
-        iaero[1:] = iaer_month
-#        iaero[1:] = data_batch['iaer_month']
-#        ds_out = S.run(data_batch, iaero)
-        ds_out = run(S, data_batch, iaero)
-        pression = data_batch['SLP'] * config_['k_p0']
-        slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaer_month[0])
-        slope_err = np.maximum(slope_err, -2)
-        slope_err = np.minimum(slope_err, 2)
+#        data_batch = data.isel(y=slice(y_min, y_max))
+        for jband, j in enumerate(range(0, s2, batch_size)):
+            x_min = max(0,j-1)
+            x_max = min(s2, j + batch_size +1)
+            data_batch = data.isel(x=slice(x_min, x_max),y=slice(y_min, y_max))
+            latitude =  data_batch.lat
+            longitude = data_batch.lon
+            date_time = data_batch["mean-time"]
+    #        iaer_best = get_iaero(frac_aer_model, latitude.values, [data_batch['SU_FRAC'].values, data_batch['DU_FRAC'].values, data_batch['OC_FRAC'].values, data_batch['SS_FRAC'].values, data_batch['BC_FRAC'].values], config_)
+    #        iaer_original = iaer_best.copy()
+            iaer_best = get_iaer(data_batch)
+            iaer_month = calculate_monthly_aerosol(date_time, latitude, longitude) #,  list_aerosol)
+            iaero  = np.zeros((config_['nmodels']+1, iaer_best.shape[0], iaer_best.shape[1]), dtype=np.int32)
+            iaero[0] = iaer_best
+    #        iaero[1:] = data_batch['iaer_month']
+            iaero[1:] = iaer_month
+    #        ds_out = S.run(data_batch, iaero)
+            pression = data_batch['SLP'] * config_['k_p0']
+    #        slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaer_month[0])
+            slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaero[1], chunksize=batch_size)
+            slope_err = np.maximum(slope_err, -2)
+            slope_err = np.minimum(slope_err, 2)
 
-#        if config_['debug']:
-        ds_out['iaero'] = (('y','x'), iaer_best)
+    #        if config_['debug']:
+#            ds_out['iaero'] = (('y','x'), iaer_best)
 
-        # suppression des lignes supplémentaires
-        if y_min != 0: y_min = 1
-        if y_max != s1 : y_max = - 1
-        data_batch = data_batch.isel(y=slice(y_min, y_max))
-        ds_out = ds_out.isel(y=slice(y_min, y_max))
-        slope_err = slope_err[:, y_min:y_max, :]
+            # suppression des lignes supplémentaires
+            if y_min != 0: y_min_2 = 1 
+            else: y_min_2 = 0
+            if y_max != s1 : y_max_2 = -1 
+            else: y_max_2 = s1
+            if x_min != 0: x_min = 1 
+            else: x_min = 0
+            if x_max != s2 : x_max = -1
+            else: x_max = s2
 
-        # gradiant AOD
-        ygrad, xgrad = da.gradient(data_batch['TOTEXTTAU'].data)
-        aod_grad = np.sqrt(ygrad**2 + xgrad**2)
-        ds_out = ds_out.assign({
-            'aod_grad': (('y','x'), aod_grad)
-        })
-        del ygrad
-        del xgrad
+#            data_batch = data_batch.isel(y=slice(y_min, y_max))
+#            ds_out = ds_out.isel(y=slice(y_min, y_max))
+#            slope_err = slope_err[:, y_min:y_max, :]
+            data_batch = data_batch.isel(x=slice(x_min, x_max), y=slice(y_min_2, y_max_2))
+            iaero = iaero[:, y_min_2:y_max_2, x_min:x_max]
+            ds_out = run(S, data_batch, iaero)
+#            ds_out = ds_out.isel(x=slice(x_min, x_max), y=slice(y_min_2, y_max_2))
+            slope_err = slope_err[:, y_min_2:y_max_2, x_min:x_max]
+            ds_out['iaero'] = (('y','x'), iaer_best[y_min_2:y_max_2, x_min:x_max])
 
-        urtoc_rtm_slope = ds_out['rTOC'].values*(slope_err - 1)
-        ds_out['slope_err'] = (('bands','y', 'x'), slope_err)
-        ds_out['urtoc_terrain'] = (('bands','y', 'x'), urtoc_rtm_slope)
-        flag = build_flag(data_batch, ds_out, config)
-        ds_out['flag'] = flag
+            # gradiant AOD
+            ygrad, xgrad = da.gradient(data_batch['TOTEXTTAU'].data)
+            aod_grad = np.sqrt(ygrad**2 + xgrad**2)
+            ds_out = ds_out.assign({
+                'aod_grad': (('y','x'), aod_grad)
+            })
+            del ygrad
+            del xgrad
 
-        urtoc_rtm_brdf = ds_out['rTOC_0'].values - ds_out['rTOC'].values
-        ds_out['UrTOC_rtm_brdf'] = (('bands', 'y', 'x'), urtoc_rtm_brdf)
-        raa = data_batch['SAA'].values - data_batch['VAA'].values
-        raa = raa % 360
-        f = (raa > 180)
-        raa[f] = 360-raa[f]
-        raa_ir = data_batch['SAA'].values - data_batch['VAA_IR'].values
-        raa_ir = raa_ir % 360
-        f = (raa_ir > 180)
-        raa_ir[f] = 360-raa_ir[f]
-        urtoc_rtm_fit = compute_rtm_fit(config_['rmt_fit_file'], data_batch['SLP']*config_['k_p0'], ds_out['iaero'], raa, raa_ir, ds_out['rTOC'].values, data_batch['SZA'].values, data_batch['TOTEXTTAU'].values, data_batch['VZA'].values, data_batch['VZA_IR'].values, data_batch.wavelengths)
-        ds_out['UrTOC_rtm_fit'] = (('bands', 'y', 'x'), urtoc_rtm_fit)
-    
-        urtoc, unc = compute_urtoc(ds_out['Jrtoa'].values, ds_out['Drtoa'].values, ds_out['Juh2o'].values, ds_out['Duh2o'].values, ds_out['Juo3'].values, ds_out['Duo3'].values, ds_out['Jpre'].values, ds_out['Dpre'].values, ds_out['Jtau550'].values, ds_out['Dtaup'].values, ds_out['UrTOC_ens'].values, urtoc_rtm_slope, urtoc_rtm_brdf, urtoc_rtm_fit, config_['u2_0'])
-        ds_out['UrTOC'] = (('bands','y','x'), urtoc)
-        ds_out['unc_h2o'] = (('bands','y','x'), unc[0])
-        ds_out['unc_o3']  = (('bands','y','x'), unc[1])
-        ds_out['unc_ps']  = (('bands','y','x'), unc[2])
-        ds_out['unc_aot'] = (('bands','y','x'), unc[3])
+            urtoc_rtm_slope = ds_out['rTOC'].data*(slope_err - 1)
+            ds_out['slope_err'] = (('bands','y', 'x'), slope_err)
+            ds_out['urtoc_terrain'] = (('bands','y', 'x'), urtoc_rtm_slope)
+            flag = build_flag(data_batch, ds_out, config)
+            ds_out['flag'] = flag
 
-        ds_out = apply_cf_attributes_from_json(ds_out, config_['cf_json_path'])
-        data_batch = apply_cf_attributes_from_json(data_batch, config_['cf_json_path'])
-        save_nc_batch(out, data_batch, ds_out, iband, batch_size, config_['jacobian']) #, config_['debug'])
+            urtoc_rtm_brdf = ds_out['rTOC_0'].values - ds_out['rTOC'].values
+            ds_out['UrTOC_rtm_brdf'] = (('bands', 'y', 'x'), urtoc_rtm_brdf)
+            raa = data_batch['SAA'].values - data_batch['VAA'].values
+            raa = raa % 360
+            f = (raa > 180)
+            raa[f] = 360-raa[f]
+            raa_ir = data_batch['SAA'].values - data_batch['VAA_IR'].values
+            raa_ir = raa_ir % 360
+            f = (raa_ir > 180)
+            raa_ir[f] = 360-raa_ir[f]
+            urtoc_rtm_fit = compute_rtm_fit(config_['rmt_fit_file'], data_batch['SLP']*config_['k_p0'], ds_out['iaero'], raa, raa_ir, ds_out['rTOC'].values, data_batch['SZA'].values, data_batch['TOTEXTTAU'].values, data_batch['VZA'].values, data_batch['VZA_IR'].values, data_batch.wavelengths)
+            ds_out['UrTOC_rtm_fit'] = (('bands', 'y', 'x'), urtoc_rtm_fit)
+        
+            urtoc, unc = compute_urtoc(ds_out['Jrtoa'].data, ds_out['Drtoa'].data, ds_out['Juh2o'].data, ds_out['Duh2o'].data, ds_out['Juo3'].data, ds_out['Duo3'].data, ds_out['Jpre'].data, ds_out['Dpre'].data, ds_out['Jtau550'].data, ds_out['Dtaup'].data, ds_out['UrTOC_ens'].data, urtoc_rtm_slope, urtoc_rtm_brdf, urtoc_rtm_fit, config_['u2_0'])
+            ds_out['UrTOC'] = (('bands','y','x'), urtoc)
+            ds_out['unc_h2o'] = (('bands','y','x'), unc[0])
+            ds_out['unc_o3']  = (('bands','y','x'), unc[1])
+            ds_out['unc_ps']  = (('bands','y','x'), unc[2])
+            ds_out['unc_aot'] = (('bands','y','x'), unc[3])
 
-        gc.collect()
+            ds_out = apply_cf_attributes_from_json(ds_out, config_['cf_json_path'])
+            data_batch = apply_cf_attributes_from_json(data_batch, config_['cf_json_path'])
+#            save_nc_batch(out, data_batch, ds_out, iband, jband, batch_size, config_['jacobian']) #, config_['debug'])
+            save_nc_batch(config_['output'], data_batch, ds_out, iband, jband, batch_size, config_['jacobian']) #, config_['debug'])
+
+            gc.collect()
 
 
     return None, None
@@ -414,9 +434,12 @@ def process(configfile):
     merra_p2 = config_['merraptwo']
     aer_file = config_['faer']
     chunks = config_['chunks_size']
+    sensor = config_['sensor']
+    smac_dir = config_['smaccoef_dir']
+    version = config_['smaccoef_version']
 
     # read ProbaV data
-    data = Level1(dirname, 'probav', chunks=chunks)
+    data = Level1(dirname, sensor, smac_dir, version, chunks=chunks)
     data = calc_error(data)
     filtre = np.isnan(data['SZA'])
 
@@ -424,7 +447,7 @@ def process(configfile):
     date = data['mean-time']
     nbands = len(data.bands)
     k1p, k2p = load_brdf(dir_brdf, date, data['lat'], data['lon'], nbands, chunks)
-    k1p.compute()
+#    k1p.compute()
     data['k1p'] = k1p
     data['k2p'] = k2p
     del k1p
@@ -450,9 +473,9 @@ def process(configfile):
 #    bandnames = {'band1':'BLUE_TOA', 'band2':'RED_TOA', 'band3':'NIR_TOA', 'band4':'SWIR_TOA'}
     frac_aer_model = pre_aer_models(aer_file)
 
-    smaccoef_dir = config_['smaccoef_dir']
 #    smac_coeffs_file = Path('/archive/proj/C3S')/'{sensor}_{camera}_smac_coeffs_v{version}.npy'.format(sensor=config_['sensor'], camera=data.CAMERA, version=config_['smaccoef_version'])
-    smac_coeffs_file = Path(smaccoef_dir)/'{sensor}_{camera}_smac_coeffs_v{version}.npy'.format(sensor=config_['sensor'], camera=data.CAMERA, version=config_['smaccoef_version'])
+#    smac_coeffs_file = Path(smaccoef_dir)/'{sensor}_{camera}_smac_coeffs_v{version}.npy'.format(sensor=config_['sensor'], camera=data.CAMERA, version=config_['smaccoef_version'])
+    smac_coeffs_file = data.attrs['smac_coeffs_file']
     ca_, ca_ind = read_smac_coefficients(smac_coeffs_file)
 
     data = data.assign_attrs({'jac_name' : ['Juh2o','Juo3','Jrtoa','Jpre','Drsurf']})
