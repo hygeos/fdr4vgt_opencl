@@ -14,6 +14,7 @@ import psutil
 import os
 from time import time
 import gc
+from glob import glob
 
 class config_class:
     def __init__(self):
@@ -532,6 +533,12 @@ def get_iaer(data):
 
 def get_mensual_faers(date):
     yyyymm = "".join(str(date).split("-")[:2])
+    base = config.amip_path + "/m2amip01.tavgM_2d_aer_Nx.*.nc4"
+    # find the closest date in the available files
+    filenames = glob(base)
+    dates = [int(f.split('.')[-2]) for f in filenames]
+    diff_dates = np.argmin([abs(d - int(yyyymm)) for d in dates])
+    yyyymm = dates[diff_dates]
     base = config.amip_path + "/m2amip{}.tavgM_2d_aer_Nx.{}.nc4"
     paths = []
     for i in range(1, 11):
@@ -573,7 +580,6 @@ def calculate_monthly_aerosol(
         date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
     else:
         date = "2017"+str(date_time.values)[5:7]
-    date = '201411'
     for aer_path in get_mensual_faers(date): 
        # Open and compute the data for the monthly draw
         dsMensualAER = xr.open_dataset(aer_path, chunks={"lat" : -1, "lon" : -1, "time" : 1})

@@ -173,7 +173,7 @@ def read_spotvgt(dirname,
     assert(len(filename)==1)
     filename = filename[0]
     sm = read_spotvgt_variable(filename, chunks)
-    ds['SM_MAP'] = (['y','x'], sm.data.astype('uint8'))
+    ds['SM_MAP'] = (['y','x'], sm.data.astype('uint16'))
     # dem
     filename = glob(dirname+'/*_DEM*.hdf*')
     if len(filename)==1:

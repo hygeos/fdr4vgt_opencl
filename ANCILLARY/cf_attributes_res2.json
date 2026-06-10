@@ -173,7 +173,10 @@
       "standard_name": "cloud_binary_mask",
       "long_name": "Cloud Mask",
       "units": "1",
-      "flag_values": [0, 1],
+      "flag_values": [
+        0,
+        1
+      ],
       "flag_meanings": "clear cloudy",
       "comment": "Cloud detection mask"
     },
@@ -190,7 +193,8 @@
     "SM_MAP": {
       "long_name": "Status Map",
       "units": "1",
-      "comment": "Per-band status/quality map"
+      "flag_meanings": "cloud_state surface_type swir_validity nir_validity red_validity blue_validity swir_coverage nir_coverage red_coverage blue_coverage",
+      "comment": "Per-pixel status map with bitwise encoding. Bits 0-2 (cloud_state): 0=clear, 1=shadow, 2=undefined, 3=cloud, 4=ice/snow. Bit 3 (surface_type): 0=sea, 1=land. Bits 4-11 (band validity/coverage): 0=bad/no coverage, 1=good/coverage. Extract with: cloud_state=(SM_MAP>>0)&0x7, surface_type=(SM_MAP>>3)&0x1, etc."
     },
     "Drtoa": {
       "long_name": "Uncertainty Contribution from TOA Reflectance",
