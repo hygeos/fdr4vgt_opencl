@@ -130,8 +130,16 @@ def read_ProbaV(dirname,
     camera = cam[basename(filename).split('_')[4]]
     src = xr.open_dataset(filename, chunks=chunks)
 #    cloud = src['SM_SHD']
-    cloud = src['CLOUD_PROBABILITY']
-    map = cloud.attrs['MAPPING']
+    #cloud = src['CLOUD_PROBABILITY']
+    filename = glob(dirname+'/*SM*.hdf*')
+    assert(len(filename)==1)
+    filename = filename[0]
+    sm = read_ProbaV_variable(filename, chunks)
+    #cloud = (src['CLOUD_PROBABILITY']/src['CLOUD_PROBABILITY'].attrs['SCALE'] + src['CLOUD_PROBABILITY'].attrs['OFFSET']) > 0.1
+    sm = sm.astype('uint16')
+    cloud = (sm.data&1==1)
+    map = src['CLOUD_PROBABILITY'].attrs['MAPPING']
+    #map = cloud.attrs['MAPPING']
     lat_axis, lon_axis = set_latlon(map, cloud.shape)
     lon, lat = meshgrid(lon_axis, lat_axis)
     filtre = np.isnan(angles['SZA'].data)
@@ -142,7 +150,7 @@ def read_ProbaV(dirname,
 
     ds = xr.Dataset({'SZA':(['y','x'], angles['SZA'].data), 'SAA':(['y','x'], angles['SAA'].data), 'VZA': (['y','x'], angles['VZA'].data), 'VAA': (['y','x'], angles['VAA'].data), 'VAA_IR': (['y','x'], angles['VAA_SWIR'].data), 'VZA_IR': (['y','x'], angles['VZA_SWIR'].data), 
                          'lat': (['y','x'], lat), 'lon': (['y','x'], lon), 
-                           'clm':(['y','x'], cloud.data.astype('uint8'))}, 
+                           'clm':(['y','x'], cloud.astype('uint8'))}, 
                           coords={'x':(['x'], np.array(lon_axis, dtype='float32')), 'y':(['y'], np.array(lat_axis, dtype='float32'))})
 
     # read toa and bitmask
@@ -167,11 +175,7 @@ def read_ProbaV(dirname,
 #        filename = filename[0]
 #        sm = read_ProbaV_variable(filename, chunks) 
 #        ds['SM_MAP'][i] = sm.data.astype('uint8')
-    filename = glob(dirname+'/*SM*.hdf*')
-    assert(len(filename)==1)
-    filename = filename[0]
-    sm = read_ProbaV_variable(filename, chunks)
-    ds['SM_MAP'] = (['y','x'], sm.data.astype('uint8'))
+    ds['SM_MAP'] = (['y','x'], sm.data.astype('uint16'))
     # dem
     filename = glob(dirname+'/*_DEM*.hdf*')
     if len(filename)==1:
