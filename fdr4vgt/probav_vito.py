@@ -30,7 +30,7 @@ def Level1_probav(dirname,
                     )
     return ds
 
-def read_ProbaV_variable(filename, chunks):
+def read_ProbaV_variable(filename, chunks, dtype='float32'):
     '''
     Read a variable from a ProbaV Level1 product.
     '''
@@ -40,6 +40,9 @@ def read_ProbaV_variable(filename, chunks):
     varname = varname[0]
 
     data = src[varname]
+    if dtype == 'uint16' and data.dtype == 'uint16':
+        return data
+
     if 'SCALE' in src[varname].attrs.keys():
         scale = np.float32(src[varname].SCALE)
         offset = np.float32(src[varname].OFFSET)
@@ -134,7 +137,7 @@ def read_ProbaV(dirname,
     filename = glob(dirname+'/*SM*.hdf*')
     assert(len(filename)==1)
     filename = filename[0]
-    sm = read_ProbaV_variable(filename, chunks)
+    sm = read_ProbaV_variable(filename, chunks, 'uint16')
     #cloud = (src['CLOUD_PROBABILITY']/src['CLOUD_PROBABILITY'].attrs['SCALE'] + src['CLOUD_PROBABILITY'].attrs['OFFSET']) > 0.1
     sm = sm.astype('uint16')
     cloud = (sm.data&1==1)
@@ -155,6 +158,7 @@ def read_ProbaV(dirname,
 
     # read toa and bitmask
     bandnames = ['BLUE', 'RED', 'NIR', 'SWIR']
+    filtre = (sm.data&8)==8
     prdnames = ['TOA','UNC_RANDOM','UNC_STRUCTURED','UNC_SYSTEMATIC']
     for p in prdnames:
         ds[p] = (['bands','y','x'], np.zeros((len(bandnames), ds.dims['y'], ds.dims['x']), dtype='float32'))
@@ -181,7 +185,8 @@ def read_ProbaV(dirname,
     if len(filename)==1:
         filename = filename[0]
         dem = read_ProbaV_variable(filename, chunks)
-        dem = dem.where(~filtre, np.nan)
+#        dem = dem.where(~filtre, np.nan)
+        dem = dem.where(filtre, np.nan)
         ds['elev'] = (['y','x'], dem.data.astype('float32'))
         ds['Delev'] = (['y','x'], np.zeros_like(dem.data, dtype='float32').astype('float32')) 
 

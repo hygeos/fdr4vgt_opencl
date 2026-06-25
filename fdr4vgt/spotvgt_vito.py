@@ -31,7 +31,7 @@ def Level1_spotvgt(dirname,
                     )
     return ds
 
-def read_spotvgt_variable(filename, chunks):
+def read_spotvgt_variable(filename, chunks, dtype='float32'):
     '''
     Read a variable from a SpotVGT Level1 product.
     '''
@@ -41,6 +41,9 @@ def read_spotvgt_variable(filename, chunks):
     varname = varname[0]
 
     data = src[varname]
+    if dtype == 'uint16' and data.dtype == 'uint16':
+        return data
+
     if 'SCALE' in src[varname].attrs.keys():
         scale = np.float32(src[varname].SCALE)
         offset = np.float32(src[varname].OFFSET)
@@ -136,7 +139,7 @@ def read_spotvgt(dirname,
     filename = glob(dirname+'/*SM*.hdf*')
     assert(len(filename)==1)
     filename = filename[0]
-    sm = read_spotvgt_variable(filename, chunks)
+    sm = read_spotvgt_variable(filename, chunks, 'uint16')
     sm = sm.astype('uint16')
     cloud = (sm.data&1)==1
 
@@ -157,6 +160,7 @@ def read_spotvgt(dirname,
 
     # read toa and bitmask
     bandnames = ['BLUE', 'RED', 'NIR', 'SWIR']
+    filtre = (sm.data&8)==8
     prdnames = ['TOA','UNC_RANDOM','UNC_STRUCTURED','UNC_SYSTEMATIC']
     for p in prdnames:
         ds[p] = (['bands','y','x'], np.zeros((len(bandnames), ds.dims['y'], ds.dims['x']), dtype='float32'))
@@ -168,6 +172,7 @@ def read_spotvgt(dirname,
             filename = filename[0]
             toa = read_spotvgt_variable(filename, chunks) 
            # name = '{}_{}'.format(b, p.lower())
+#            toa = toa.where(filtre, np.nan)
             ds[p][i] = toa.data.astype('float32')
 
 #    smnames = ['BLUE_SM_MAP', 'RED_SM_MAP', 'NIR_SM_MAP', 'SWIR_SM_MAP']
@@ -183,7 +188,7 @@ def read_spotvgt(dirname,
     if len(filename)==1:
         filename = filename[0]
         dem = read_spotvgt_variable(filename, chunks)
-        dem = dem.where(~filtre, np.nan)
+        dem = dem.where(filtre, np.nan)
         ds['elev'] = (['y','x'], dem.data.astype('float32'))
         ds['Delev'] = (['y','x'], np.zeros_like(dem.data, dtype='float32').astype('float32')) 
 
@@ -195,11 +200,11 @@ def read_spotvgt(dirname,
 #        dem = dem.where(~filtre, np.nan)
 #        ds['Delev'] = (['y','x'], dem.data.astype('float32'))
 
-    ds['mean-time'] = dt
-    ds['mean-time-dec'] = date_to_float(dt)
     attributs = {"bands": bandnames, 'sensor':'spotvgt1', 'wavelengths': [.463, .655, .865, 1.600], 'smac_coeffs_file': smac_coeffs_file} #, 'mean-time': dt, 'mean-time-dec': date_to_float(dt)}
     ds = ds.assign_attrs(attributs)
     ds = ds.chunk({'y':chunks, 'x':chunks, 'bands':-1})
+    ds['mean-time'] = dt
+    ds['mean-time-dec'] = date_to_float(dt)
 
     return ds
 
