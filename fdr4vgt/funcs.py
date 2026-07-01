@@ -102,6 +102,110 @@ def memory_tracker(func):
             
     return wrapper
 
+def shift_lon_to_360(ds, lon_sat):
+    '''
+    Convert dataset longitudes from [-180, 180] to [0, 360] when needed.
+
+    If the satellite longitude array contains only positive values and the
+    dataset longitudes include negative values, this function shifts the
+    negative longitudes by +360 and sorts the coordinate values.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Input dataset with a longitude coordinate named 'lon'.
+    lon_sat : xarray.DataArray or array-like
+        Satellite longitudes used to determine whether the dataset longitudes
+        should be converted to the [0, 360] range.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with adjusted longitude coordinates when conversion is applied.
+    '''
+    if np.nanmax(lon_sat) > np.max(ds.lon.values):
+        filtre = ds.lon.values < 0
+        new_lon = ds.lon.values.copy()
+        new_lon[filtre] = new_lon[filtre] + 360
+        ds = ds.assign_coords(lon=new_lon)
+        ds = ds.sortby('lon')
+    return ds
+
+def shift_lon_sat_to_360(lon_sat):
+    """Convert satellite longitude values from a mixed [-180, 180] range
+    to a consistent [0, 360] range.
+
+    The function examines the input ``lon_sat`` array.  If the array
+    contains both negative and positive values (i.e. a mix of western
+    and eastern longitudes), it assumes the data are in the standard
+    geographic convention where longitudes span from -180° to +180°.
+    In that case the function shifts all negative values by +360° so
+    that the resulting array contains only values in the 0–360° range.
+    This is useful when the satellite data need to be merged with
+    other datasets that use the 0–360° convention.
+
+    Parameters
+    ----------
+    lon_sat : xarray.DataArray or array‑like
+        Satellite longitude values.  The function operates on the
+        underlying NumPy array via ``lon_sat.values``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The longitude array with all negative values shifted by +360°.
+        If the input array already contains only non‑negative values,
+        it is returned unchanged.
+    """
+    # If the satellite longitudes span both negative and positive
+    # values, shift the negative part by +360 to obtain a 0–360 range.
+    lon_max = np.nanmax(lon_sat)
+    lon_min = np.nanmin(lon_sat)
+    if lon_max > 0 and lon_min < 0 and lon_max-lon_min > 300:
+        # Create a copy to avoid modifying the original array.
+        new_lon_sat = lon_sat.values.copy()
+        # Add 360 to all negative longitudes.
+        new_lon_sat[new_lon_sat < 0] += 360
+        return xr.DataArray(new_lon_sat)
+    # No conversion needed; return the original array.
+    return xr.DataArray(lon_sat)
+
+def shift_lon_to_180(ds):
+    """Convert longitudes from a 0–360° range back to the standard
+    [-180, 180] range.
+
+    The function inspects the longitude coordinate of the provided
+    :class:`xarray.Dataset`.  If the maximum longitude value exceeds
+    180°, it assumes the dataset uses a 0–360° convention and
+    subtracts 360° from all values greater than 180°.  The updated
+    coordinate is then assigned back to the dataset and the coordinates
+    are sorted.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset containing a longitude coordinate named ``lon`` or
+        ``x``.
+
+    Returns
+    -------
+    xarray.Dataset
+        The dataset with longitudes converted to the [-180, 180] range.
+    """
+    # Determine which coordinate holds the longitude values.
+    if 'x' in ds.dims:
+        lon = ds.x
+    else:
+        lon = ds.lon
+    # If the dataset uses a 0–360° convention, shift values > 180°.
+    if np.nanmax(lon) > 180:
+        # Create a copy to avoid modifying the original array.
+        old_lon = lon.values.copy()
+        old_lon -= 360
+        ds = ds.assign_coords(lon=old_lon)
+        ds = ds.sortby('lon')
+    return ds
+
 def build_flag(ds_input, ds_output, config_data):
 #    flag_aot = ds_input.rtoa.max(dim="bands") >= config_data.getfloat("Coefficients", "aotmax")
     flag_aot = np.max(ds_input['TOA'], axis=0) >= config_data.getfloat("Coefficients", "aotmax")
@@ -473,6 +577,9 @@ def get_aer_interpolated(dsAER: xr.Dataset, latitude, longitude, date_time=None)
     """
 #    vars_ = ["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]
     vars_ = ["TOTEXTTAU", "SU_FRAC", "DU_FRAC", "OC_FRAC", "SS_FRAC", "BC_FRAC"]
+    dsAER = shift_lon_to_360(dsAER, longitude.values)
+    longitude = shift_lon_sat_to_360(longitude.values)
+    longitude = Linear(longitude)
     interp_kwargs = {'lat': latitude, 'lon': longitude}
     if date_time is not None:
         interp_kwargs['time'] = date_time
@@ -480,7 +587,10 @@ def get_aer_interpolated(dsAER: xr.Dataset, latitude, longitude, date_time=None)
     interp_vars = {}
     for v in vars_:
         interp_vars[v] = interp(dsAER[v].astype(np.float32), **interp_kwargs).astype(np.float32)
-    return xr.Dataset(interp_vars)
+    ds = xr.Dataset(interp_vars)
+    ds = shift_lon_to_180(ds)
+    return ds
+#    return xr.Dataset(interp_vars)
 
 def pre_aer_models(faer, match):
     """

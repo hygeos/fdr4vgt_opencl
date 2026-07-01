@@ -17,12 +17,12 @@ from time import time
 import gc
 import sys
 import dask
-from funcs import calculate_monthly_aerosol, config, get_slope_err, open_monthly_aerosol, read_smac_coefficients, build_flag, setup_logger, memory_tracker, get_iaer
+from funcs import calculate_monthly_aerosol, config, get_slope_err, open_monthly_aerosol, read_smac_coefficients, build_flag, setup_logger, memory_tracker, get_iaer, shift_lon_to_360, shift_lon_sat_to_360, shift_lon_to_180
 from CF_from_json import apply_cf_attributes_from_json, validate_cf_compliance
 import onnxruntime as ort
 
 from smaccl.ISmaccl import ISmaccl
-from smaccl.smaccl import type_coeff, get_smac_coeffs
+#from smaccl.smaccl import type_coeff, get_smac_coeffs
 
 # Ajouter au début du fichier, après les imports
 #setup_logger()
@@ -110,6 +110,10 @@ def read_merra(merra_aer, merra_p2, lat_sat, lon_sat, time, chunks):
     assert((time >= np.min(aer['time'])) and (time <= np.max(aer['time'])))
     assert((time >= np.min(p2['time'])) and (time <= np.max(p2['time'])))
 
+    aer = shift_lon_to_360(aer, lon_sat)
+    p2 = shift_lon_to_360(p2, lon_sat)
+    lon_sat = shift_lon_sat_to_360(lon_sat)
+
     tau  =    interpolate.interp(aer['TOTEXTTAU'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
     uh2o    = interpolate.interp(p2['TQV'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
     uo3     = interpolate.interp(p2['TO3'], lat=interpolate.Linear(lat_sat), lon=interpolate.Linear(lon_sat), time=interpolate.Linear(time)).astype(np.float32)
@@ -123,11 +127,12 @@ def read_merra(merra_aer, merra_p2, lat_sat, lon_sat, time, chunks):
 
     del aer
     del p2
-
     merra = xa.Dataset({'TOTEXTTAU':tau, 'TQV':uh2o*1e-1, 'TO3':uo3*1e-3, 'SLP':p0*1e-2, 'T10M':t10m, 'BC_FRAC':bc_frac/tau, 'DU_FRAC':du_frac/tau, 'SS_FRAC':ss_frac/tau, 'SU_FRAC':su_frac/tau, "OC_FRAC":oc_frac/tau, 
                        'lat': lat_sat, 'lon': lon_sat}
                        )
     merra = merra.chunk({'y':chunks, 'x':chunks})
+
+    merra = shift_lon_to_180(merra)
     
     return merra
 
@@ -364,7 +369,6 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512):
 
             gc.collect()
 
-
     return None, None
 
 #@memory_tracker
@@ -374,17 +378,15 @@ def process_block(data, frac_aer_model, ca_, ca_ind, config, batch_size=128):
     """
     S = ISmaccl(config, frac_aer_model, ca_, platform='CPU', breakpoint=False)
 
-    ds_out = S.run_block(data, batch_size=512)
-    return ds_out
+#    ds_out = S.run_block(data, batch_size=512)
+#    return ds_out
     NB = len(data.bands)
     SIZE1 = data['SZA'].shape[0]
     SIZE2 = data['SZA'].shape[1]
     Naero = 11
     zero4d = xa.DataArray(np.zeros((NB, SIZE1, SIZE2, Naero), dtype=np.float32), dims=('bands','Y','X','aermodel')).chunk({'bands':-1, 'Y':batch_size, 'X':batch_size, 'aermodel':-1})
 #    zero4d = xa.DataArray(da.zeros((NB, SIZE1, SIZE2, Naero), dtype=np.float32, order='C'), dims=('bands','Y','X','aermodel')).chunk({'bands':-1, 'Y':batch_size, 'X':batch_size, 'aermodel':-1})
-    print(zero4d)
     zero3d = xa.DataArray(da.zeros((NB, SIZE1, SIZE2), dtype=np.float32), dims=('bands','Y','X')).chunk({'bands':-1, 'Y':batch_size, 'X':batch_size})
-    print(zero3d)
     
     list_rsurf = ['rsurf_{}'.format(i) for i in range(Naero)]
     ds_in = xa.Dataset(
@@ -398,12 +400,19 @@ def process_block(data, frac_aer_model, ca_, ca_ind, config, batch_size=128):
         ds_in, 
         template=xa.Dataset(
             {
-                'rsurf': zero4d,
-#                'Juh2o': zero3d,
-#                'Juo3':  zero3d,
-#                'Jrtoa': zero3d,
-#                'Jpre':  zero3d,
-#                'Drsurf':zero3d,
+                'rTOC': zero3d,
+                'rTOC_0': zero3d,
+                'UrTOC_ens': zero3d,
+                'Jrtoa': zero3d,
+                'Juh2o': zero3d,
+                'Juo3': zero3d,
+                'Jpre': zero3d,
+                'Jtaup': zero3d,
+                'Duh2o': zero3d,
+                'Duo3': zero3d,
+                'Drtoa': zero3d,
+                'Dpre': zero3d,
+                'Dtaup': zero3d
             }
         )
     )
@@ -481,9 +490,12 @@ def process(configfile):
     data = data.assign_attrs({'jac_name' : ['Juh2o','Juo3','Jrtoa','Jpre','Drsurf']})
     data = data.chunk({'y':chunks, 'x':chunks, 'bands':-1})
 
-    print("#### date ####", date.values, type(date))
+#    filtre = (data['SM_MAP'].data&8)==8
+#    data = data.where(filtre, np.nan)
     toc,  jac = process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=chunks)
-
+#    ds_out = process_block(data, frac_aer_model, ca_, ca_ind, config_, batch_size=chunks)
+#    ds_out.compute()
+#    print(ds_out['rTOC'].values)
 if __name__ == '__main__':
     import sys
     if len(sys.argv) != 2:
