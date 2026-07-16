@@ -49,6 +49,7 @@ psutil = '*'
 xdem = "0.1.5.*"
 config = '*'
 ONNXRuntime = '*'
+zarr = "*"
 
 
 [tool.pixi.feature.sys.dependencies]

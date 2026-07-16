@@ -7,6 +7,7 @@ import probav_vito as probav
 from core.interpolate import interp, Linear
 from core.tools import xrcrop
 from scipy.signal import convolve2d
+from scipy.interpolate import RegularGridInterpolator
 import logging
 import datetime
 import functools
@@ -555,15 +556,11 @@ def closest_model_pixelwise(image_data, lut_data):
     return indices
 
 def closest_model_low(image_data, lut_data):
-    pixels = image_data.T 
+    pixels = image_data.T
     indices = np.zeros((pixels.shape[0],), dtype=np.uint8)
     i_min = np.zeros((pixels.shape[0],), dtype=np.float32)+1e10
     for i in range(lut_data.shape[1]):
-        lut = lut_data[:, i]  
-#        lut_norms = np.sum(lut ** 2, axis=0) 
-#        dot_products = pixels @ lut 
-#        pixel_norms = np.sum(pixels **2, axis=1)
-#        distances = pixel_norms + lut_norms - 2 * dot_products 
+        lut = lut_data[:, i]
         distances = np.sum((pixels - lut) ** 2, axis=1)
         i_min = np.minimum(i_min, distances)
         f = np.where(i_min == distances)
@@ -571,31 +568,97 @@ def closest_model_low(image_data, lut_data):
 
     return indices
 
+def regular_interp(da, tgt_lat, tgt_lon, tgt_time=None):
+    """
+    Fast interpolation of a DataArray defined on a REGULAR (lat, lon[, time])
+    grid onto target lat/lon points, optionally at a single time.
+
+    MERRA2 and the monthly climatology are on regular spatial+temporal grids, so
+    we use scipy.RegularGridInterpolator on plain numpy arrays. This avoids the
+    dask task-graph / per-pixel weight-location overhead of the generic
+    core.interpolate.interp (which dominated the per-tile cost).
+    """
+    lat = np.asarray(da['lat'].values, dtype=np.float64)
+    lon = np.asarray(da['lon'].values, dtype=np.float64)
+    tgt_lat = np.asarray(tgt_lat, dtype=np.float64)
+    tgt_lon = np.asarray(tgt_lon, dtype=np.float64)
+    shape = tgt_lat.shape
+
+    use_time = ('time' in da.dims) and (tgt_time is not None)
+    if 'time' in da.dims:
+        da = da.transpose('time', 'lat', 'lon')
+    else:
+        da = da.transpose('lat', 'lon')
+    vals = np.asarray(da.values, dtype=np.float64)
+
+    # RegularGridInterpolator requires strictly ascending axes.
+    if lat[0] > lat[-1]:
+        lat = lat[::-1]
+        vals = vals[..., ::-1, :]
+    if lon[0] > lon[-1]:
+        lon = lon[::-1]
+        vals = vals[..., :, ::-1]
+
+    flat_lat = tgt_lat.ravel()
+    flat_lon = tgt_lon.ravel()
+    nanmask = ~(np.isfinite(flat_lat) & np.isfinite(flat_lon))
+    if nanmask.any():
+        flat_lat = flat_lat.copy()
+        flat_lon = flat_lon.copy()
+        flat_lat[nanmask] = lat[0]
+        flat_lon[nanmask] = lon[0]
+
+    if use_time:
+        t0 = da['time'].values[0]
+        tsrc = (da['time'].values - t0) / np.timedelta64(1, 's')
+        ttgt = (np.datetime64(tgt_time) - t0) / np.timedelta64(1, 's')
+        rgi = RegularGridInterpolator((tsrc, lat, lon), vals,
+                                      method='linear', bounds_error=False, fill_value=None)
+        pts = np.empty((flat_lat.size, 3), dtype=np.float64)
+        pts[:, 0] = float(ttgt)
+        pts[:, 1] = flat_lat
+        pts[:, 2] = flat_lon
+    else:
+        if vals.ndim == 3:      # singleton time (monthly climatology)
+            vals = vals[0]
+        rgi = RegularGridInterpolator((lat, lon), vals,
+                                      method='linear', bounds_error=False, fill_value=None)
+        pts = np.empty((flat_lat.size, 2), dtype=np.float64)
+        pts[:, 0] = flat_lat
+        pts[:, 1] = flat_lon
+
+    out = rgi(pts)
+    if nanmask.any():
+        out[nanmask] = np.nan
+    return out.astype(np.float32).reshape(shape)
+
+
 def get_aer_interpolated(dsAER: xr.Dataset, latitude, longitude, date_time=None) -> xr.Dataset:
     """
-    Interpolate aerosol data to specified coordinates and time.
+    Interpolate aerosol data (regular grid) to the target lat/lon points.
     """
-#    vars_ = ["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]
     vars_ = ["TOTEXTTAU", "SU_FRAC", "DU_FRAC", "OC_FRAC", "SS_FRAC", "BC_FRAC"]
-    dsAER = shift_lon_to_360(dsAER, longitude.values)
-    longitude = shift_lon_sat_to_360(longitude.values)
-    longitude = Linear(longitude)
-    interp_kwargs = {'lat': latitude, 'lon': longitude}
+    lat_v = np.asarray(latitude.values if hasattr(latitude, 'values') else latitude)
+    lon_v = np.asarray(longitude.values if hasattr(longitude, 'values') else longitude)
+    tv = None
     if date_time is not None:
-        interp_kwargs['time'] = date_time
-
+        tv = np.datetime64(date_time.values) if hasattr(date_time, 'values') else np.datetime64(date_time)
     interp_vars = {}
     for v in vars_:
-        interp_vars[v] = interp(dsAER[v].astype(np.float32), **interp_kwargs).astype(np.float32)
-    ds = xr.Dataset(interp_vars)
-    ds = shift_lon_to_180(ds)
-    return ds
-#    return xr.Dataset(interp_vars)
+        interp_vars[v] = (('y', 'x'), regular_interp(dsAER[v], lat_v, lon_v, tv))
+    return xr.Dataset(interp_vars)
+
+
+_pre_aer_models_cache = {}
+
 
 def pre_aer_models(faer, match):
     """
     Read MERRA2/CAMS aerosols components fraction of the aerosol models
     """
+    cache_key = (faer, tuple(match.keys()))
+    if cache_key in _pre_aer_models_cache:
+        return _pre_aer_models_cache[cache_key]
     rh = {'sulf': 80., 'dust': 80., 'oc': 80., 'ssalt': 80., 'bc': 0.}
     Ha = {'sulf': 8., 'dust': 2., 'oc': 8., 'ssalt': 1., 'bc': 8.}
     f = open(faer, 'r')
@@ -606,6 +669,7 @@ def pre_aer_models(faer, match):
         frac_aer_model[key] = np.array(line.split()).astype(np.float32)
     f.close()
 
+    _pre_aer_models_cache[cache_key] = (frac_aer_model, rh, Ha)
     return frac_aer_model, rh, Ha
 
 def get_iaer(data):
@@ -674,53 +738,53 @@ def open_monthly_aerosol(date_time):
         dsMensualAERs.append(dsMensualAER)
     return dsMensualAERs
 
+def preload_monthly_aerosol(date_time):
+    """
+    Open, select, rename and load into memory (once) the monthly MERRA2 aerosol
+    datasets so they can be reused across all tiles instead of being re-read
+    from disk for every tile. The returned datasets are small global grids and
+    are independent of the number of tiles.
+    """
+    if int(str(date_time.values)[:4]) <= 2017:
+        date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
+    else:
+        date = "2017"+str(date_time.values)[5:7]
+    datasets = []
+    for aer_path in get_mensual_faers(date):
+        dsMensualAER = xr.open_dataset(aer_path, chunks={"lat" : -1, "lon" : -1, "time" : 1})
+        dsMensualAER = dsMensualAER[["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU",
+                                     "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]].astype(np.float32)
+        dsMensualAER = dsMensualAER.rename({"BCEXTTAU":"BC_FRAC", "DUEXTTAU":"DU_FRAC","SSEXTTAU":"SS_FRAC","OCEXTTAU":"OC_FRAC","SUEXTTAU":"SU_FRAC"})
+        datasets.append(dsMensualAER.compute())
+    return datasets
+
 #@memory_tracker
 def calculate_monthly_aerosol(
     date_time, 
     latitude, 
     longitude,
+    datasets=None,
 ):
 
-    print("Loading monthly aerosol data...")
-    
-#    dsMensualAERs = []
-    mensual_iaer = None
-   # giet_mensual_faers is assumed to return a list of file paths
-    if int(str(date_time.values)[:4]) <= 2017:
-        date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
-    else:
-        date = "2017"+str(date_time.values)[5:7]
-    for aer_path in get_mensual_faers(date): 
-       # Open and compute the data for the monthly draw
-        dsMensualAER = xr.open_dataset(aer_path, chunks={"lat" : -1, "lon" : -1, "time" : 1})
-       # Select and compute the necessary TOTEXTTAU and its components
-        dsMensualAER = dsMensualAER[["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", 
-                                     "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]].astype(np.float32)
-        dsMensualAER = dsMensualAER.rename({"BCEXTTAU":"BC_FRAC", "DUEXTTAU":"DU_FRAC","SSEXTTAU":"SS_FRAC","OCEXTTAU":"OC_FRAC","SUEXTTAU":"SU_FRAC"})
+    # ``datasets`` may be preloaded once (see preload_monthly_aerosol) to avoid
+    # re-reading the 10 monthly aerosol files from disk for every tile.
+    if datasets is None:
+        datasets = preload_monthly_aerosol(date_time)
 
+    mensual_iaer = []
+    for dsMensualAER in datasets:
         # Interpolate the aerosol data to the observation's geometry
         mensual_faer = get_aer_interpolated(
-            dsMensualAER.compute(), 
-            Linear(latitude), 
-            Linear(longitude), 
+            dsMensualAER,
+            latitude,
+            longitude,
             None # Time interpolation is not used here for monthly data
         ) #.transpose()
-        
-        mensual_faer = get_iaer(mensual_faer)
-        if mensual_iaer is None: 
-            mensual_iaer = mensual_faer
-        else:
-            mensual_iaer = np.concatenate([mensual_iaer, mensual_faer], axis=0)
-#        dsMensualAERs.append(mensual_faer.squeeze())
-#        gc.collect()
-        
-    # Combine all monthly draws into a single dataset with a 'tirage' dimension
-#    dsMensualAERs = xr.concat(dsMensualAERs, dim="tirage").drop_vars("time").astype(np.float32)
-#    dsMensualAERs = dsMensualAERs.assign_coords(tirage=np.arange(10))
-    
-#    mensual_iaer = get_iaer(dsMensualAERs)
 
-    return mensual_iaer 
+        mensual_iaer.append(get_iaer(mensual_faer))
+
+    # Stack the per-month model indices into (nmonths, y, x).
+    return np.stack(mensual_iaer, axis=0)
 
 def _load_or_compute_terrain(latitude, longitude, dsDEM):
     """Load cached terrain data or compute if not available."""
@@ -815,8 +879,13 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
     return np.array(slope_errs)
 
 #@memory_tracker
-def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize):
-    dsDEM = xrcrop(xr.open_dataset(config.dem_path, chunks="auto"), lat = ds_probav.y).chunk({"lat" : chunksize, "lon" : chunksize})
+def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize, dem_ds=None):
+    # ``dem_ds`` may be an already-open (lazy) DEM dataset preloaded once to
+    # avoid re-opening the file for every tile. Cropping + compute stays
+    # per-tile so peak memory remains bounded.
+    if dem_ds is None:
+        dem_ds = xr.open_dataset(config.dem_path, chunks="auto")
+    dsDEM = xrcrop(dem_ds, lat = ds_probav.y).chunk({"lat" : chunksize, "lon" : chunksize})
     dsDEM = dsDEM.compute()
     terrain_data = _load_or_compute_terrain(ds_probav.lat, ds_probav.lon, dsDEM)
 

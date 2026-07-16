@@ -3,6 +3,7 @@ from glob import glob
 import numpy as np
 from os.path import basename
 from dask.array import meshgrid
+from dask.array import stack as dask_stack
 from pathlib import Path
 
 def date_to_float(d, epoch=np.datetime64('1980-01-01T00:00:00.000000000')):
@@ -162,18 +163,17 @@ def read_spotvgt(dirname,
     bandnames = ['BLUE', 'RED', 'NIR', 'SWIR']
     filtre = (sm.data&8)==8
     prdnames = ['TOA','UNC_RANDOM','UNC_STRUCTURED','UNC_SYSTEMATIC']
+    # Keep TOA / UNC lazy (dask) instead of materialising ~1.5 GB of numpy up front;
+    # they are read per tile during processing, which keeps the resident base small.
     for p in prdnames:
-        ds[p] = (['bands','y','x'], np.zeros((len(bandnames), ds.dims['y'], ds.dims['x']), dtype='float32'))
-#    ds['SM_MAP'] = (['bands','y','x'], np.zeros((len(bandnames), ds.dims['y'], ds.dims['x']), dtype='uint8'))
-    for i, c in enumerate(bandnames):
-        for p in prdnames:
+        band_arrays = []
+        for c in bandnames:
             filename = glob('{}/*{}_{}*.hdf*'.format(dirname, c, p))
             assert(len(filename)==1)
             filename = filename[0]
-            toa = read_spotvgt_variable(filename, chunks) 
-           # name = '{}_{}'.format(b, p.lower())
-#            toa = toa.where(filtre, np.nan)
-            ds[p][i] = toa.data.astype('float32')
+            toa = read_spotvgt_variable(filename, chunks)
+            band_arrays.append(toa.data.astype('float32'))
+        ds[p] = (['bands','y','x'], dask_stack(band_arrays, axis=0))
 
 #    smnames = ['BLUE_SM_MAP', 'RED_SM_MAP', 'NIR_SM_MAP', 'SWIR_SM_MAP']
 #    for i, c in enumerate(smnames):                                                                                                                                                                                  
@@ -191,6 +191,7 @@ def read_spotvgt(dirname,
         dem = dem.where(filtre, np.nan)
         ds['elev'] = (['y','x'], dem.data.astype('float32'))
         ds['Delev'] = (['y','x'], np.zeros_like(dem.data, dtype='float32').astype('float32')) 
+
 
     smac_coeffs_file = Path(smac_dir)/'VGT{}_smac_coeffs_v{version}.npy'.format(sensor[-1],version=version)
 #    filename = glob(dirname+'/*_DELTADEM*.hdf*')
