@@ -483,6 +483,9 @@ def _worker_compute_tile(task):
 # MERRA2 fields cached to the local ancillary Zarr store (interpolated once).
 _MERRA_CACHE_VARS = ['TOTEXTTAU','TQV','TO3','SLP','T10M',
                      'BC_FRAC','DU_FRAC','SS_FRAC','SU_FRAC','OC_FRAC']
+# Keep pressure/temperature in float32: ISmaccl->Ps computes log(R*T), and
+# float16 overflows for typical T10M (~290 K) because R*T > 65504.
+_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}
 
 
 def precompute_ancillary(data, config_, merra_globals, monthly_datasets,
@@ -518,11 +521,13 @@ def precompute_ancillary(data, config_, merra_globals, monthly_datasets,
 
     # Write the store schema/chunking up-front (metadata only); the values are
     # filled in by the per-tile region writes below. zarr_format=2 avoids an
-    # xarray/zarr-v3 _FillValue incompatibility that breaks region writes. The
-    # MERRA fields are stored as float16 to halve the cache size (RAM if tmp is
-    # tmpfs); the aerosol-model indices (uint8) are exact.
+    # xarray/zarr-v3 _FillValue incompatibility that breaks region writes. Most
+    # MERRA fields are stored as float16 to halve cache size, but SLP/T10M stay
+    # float32 to avoid overflow in pressure correction (Ps uses log(R*T)).
+    # The aerosol-model indices (uint8) are exact.
     template = xa.Dataset(
-        {v: (('y', 'x'), da.zeros((s1, s2), dtype=np.float16,
+        {v: (('y', 'x'), da.zeros((s1, s2),
+                                  dtype=(np.float32 if v in _MERRA_CACHE_FLOAT32_VARS else np.float16),
                                   chunks=(batch_size, batch_size)))
          for v in _MERRA_CACHE_VARS}
     )
@@ -573,7 +578,7 @@ def precompute_ancillary(data, config_, merra_globals, monthly_datasets,
                 dt, lat, lon, datasets=monthly_datasets).astype(np.uint8)
 
             region_ds = xa.Dataset({
-                **{v: (('y', 'x'), region_vars[v][1].astype(np.float16))
+                **{v: (('y', 'x'), region_vars[v][1].astype(np.float32 if v in _MERRA_CACHE_FLOAT32_VARS else np.float16))
                    for v in _MERRA_CACHE_VARS},
                 'iaer_best': (('y', 'x'), iaer_best),
                 'iaer_month': (('month', 'y', 'x'), iaer_month),
