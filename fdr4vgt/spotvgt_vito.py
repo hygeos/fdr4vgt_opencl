@@ -190,7 +190,17 @@ def read_spotvgt(dirname,
         dem = read_spotvgt_variable(filename, chunks)
         dem = dem.where(filtre, np.nan)
         ds['elev'] = (['y','x'], dem.data.astype('float32'))
-        ds['Delev'] = (['y','x'], np.zeros_like(dem.data, dtype='float32').astype('float32')) 
+    
+    # Try to load DELTADEM for elevation uncertainty
+    filename = glob(dirname+'/*_DELTADEM*.hdf*')
+    if len(filename)==1:
+        filename = filename[0]
+        dem = read_spotvgt_variable(filename, chunks)
+        dem = dem.where(filtre, np.nan)  # Apply same mask as for elev
+        ds['Delev'] = (['y','x'], dem.data.astype('float32'))
+    else:
+        # Fallback: use zeros if DELTADEM not available
+        ds['Delev'] = (['y','x'], np.zeros_like(ds['elev'].values, dtype='float32')) 
 
 
     smac_coeffs_file = Path(smac_dir)/'VGT{}_smac_coeffs_v{version}.npy'.format(sensor[-1],version=version)

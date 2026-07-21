@@ -2,20 +2,21 @@ import xarray as xr
 import numpy as np
 from pathlib import Path
 import xdem.terrain as xdem_terrain
-#import config
-import probav_vito as probav
 from core.interpolate import interp, Linear
 from core.tools import xrcrop
-from scipy.signal import convolve2d
 from scipy.interpolate import RegularGridInterpolator
-import logging
-import datetime
-import functools
+from scipy.ndimage import maximum_filter
 import psutil
 import os
 from time import time
 import gc
 from glob import glob
+import csv
+
+try:
+    import rasterio
+except Exception:
+    rasterio = None
 
 class config_class:
     def __init__(self):
@@ -24,84 +25,12 @@ class config_class:
     def set(self, name, value):
         self.__dict__[name] = value
 
-    def getfloat(self, part, name):
+    def getfloat(self, name):
         assert(name in self.__dict__.keys())
         return self.__dict__[name]
 
 
 config = config_class()
-
-def setup_logger():
-    """Configure le logger avec un format plus détaillé"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s | %(levelname)s | %(message)s',
-        handlers=[
-            logging.FileHandler(f'memory_usage_{datetime.datetime.now():%Y%m%d_%H%M}.log'),
-            logging.StreamHandler()
-        ]
-    )
-
-def memory_tracker(func):
-    """Décorateur pour suivre l'utilisation de la mémoire d'une fonction"""
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        pc = psutil.Process(os.getpid())
-        
-        # Mesure avant exécution
-        mem_before = pc.memory_info().rss / 1024 / 1024  # En MB
-        start_time = time()
-        peak_memory = mem_before
-        
-        # Fonction pour mesurer la mémoire pendant l'exécution
-        def get_current_memory():
-            return pc.memory_info().rss / 1024 / 1024
-        
-        try:
-            # Exécution de la fonction
-            result = func(*args, **kwargs)
-            
-            # Mesure finale
-            peak_memory = max(peak_memory, get_current_memory())
-            end_time = time()
-            mem_after = get_current_memory()
-            
-            # Calcul des différences
-            duration = end_time - start_time
-            mem_diff = mem_after - mem_before
-            
-            logging.info(
-                f"\n{'='*50}\n"
-                f"Function: {func.__name__}\n"
-                f"Memory before: {mem_before:,.2f} MB\n"
-                f"Memory after: {mem_after:,.2f} MB\n"
-                f"Peak memory: {peak_memory:,.2f} MB\n"
-                f"Memory used: {mem_diff:,.2f} MB\n"
-                f"Duration: {duration:.2f} seconds\n"
-                f"{'='*50}"
-            )
-            
-            return result
-            
-        except Exception as e:
-            # En cas d'erreur, on log quand même l'utilisation mémoire
-            end_time = time()
-            mem_after = get_current_memory()
-            peak_memory = max(peak_memory, mem_after)
-            
-            logging.error(
-                f"\n{'='*50}\n"
-                f"Function: {func.__name__} (FAILED)\n"
-                f"Error: {str(e)}\n"
-                f"Memory before: {mem_before:,.2f} MB\n"
-                f"Memory after: {mem_after:,.2f} MB\n"
-                f"Peak memory: {peak_memory:,.2f} MB\n"
-                f"Duration: {end_time - start_time:.2f} seconds\n"
-                f"{'='*50}"
-            )
-            raise
-            
-    return wrapper
 
 def shift_lon_to_360(ds, lon_sat):
     '''
@@ -132,91 +61,16 @@ def shift_lon_to_360(ds, lon_sat):
         ds = ds.sortby('lon')
     return ds
 
-def shift_lon_sat_to_360(lon_sat):
-    """Convert satellite longitude values from a mixed [-180, 180] range
-    to a consistent [0, 360] range.
-
-    The function examines the input ``lon_sat`` array.  If the array
-    contains both negative and positive values (i.e. a mix of western
-    and eastern longitudes), it assumes the data are in the standard
-    geographic convention where longitudes span from -180° to +180°.
-    In that case the function shifts all negative values by +360° so
-    that the resulting array contains only values in the 0–360° range.
-    This is useful when the satellite data need to be merged with
-    other datasets that use the 0–360° convention.
-
-    Parameters
-    ----------
-    lon_sat : xarray.DataArray or array‑like
-        Satellite longitude values.  The function operates on the
-        underlying NumPy array via ``lon_sat.values``.
-
-    Returns
-    -------
-    numpy.ndarray
-        The longitude array with all negative values shifted by +360°.
-        If the input array already contains only non‑negative values,
-        it is returned unchanged.
-    """
-    # If the satellite longitudes span both negative and positive
-    # values, shift the negative part by +360 to obtain a 0–360 range.
-    lon_max = np.nanmax(lon_sat)
-    lon_min = np.nanmin(lon_sat)
-    if lon_max > 0 and lon_min < 0 and lon_max-lon_min > 300:
-        # Create a copy to avoid modifying the original array.
-        new_lon_sat = lon_sat.values.copy()
-        # Add 360 to all negative longitudes.
-        new_lon_sat[new_lon_sat < 0] += 360
-        return xr.DataArray(new_lon_sat)
-    # No conversion needed; return the original array.
-    return xr.DataArray(lon_sat)
-
-def shift_lon_to_180(ds):
-    """Convert longitudes from a 0–360° range back to the standard
-    [-180, 180] range.
-
-    The function inspects the longitude coordinate of the provided
-    :class:`xarray.Dataset`.  If the maximum longitude value exceeds
-    180°, it assumes the dataset uses a 0–360° convention and
-    subtracts 360° from all values greater than 180°.  The updated
-    coordinate is then assigned back to the dataset and the coordinates
-    are sorted.
-
-    Parameters
-    ----------
-    ds : xarray.Dataset
-        Dataset containing a longitude coordinate named ``lon`` or
-        ``x``.
-
-    Returns
-    -------
-    xarray.Dataset
-        The dataset with longitudes converted to the [-180, 180] range.
-    """
-    # Determine which coordinate holds the longitude values.
-    if 'x' in ds.dims:
-        lon = ds.x
-    else:
-        lon = ds.lon
-    # If the dataset uses a 0–360° convention, shift values > 180°.
-    if np.nanmax(lon) > 180:
-        # Create a copy to avoid modifying the original array.
-        old_lon = lon.values.copy()
-        old_lon -= 360
-        ds = ds.assign_coords(lon=old_lon)
-        ds = ds.sortby('lon')
-    return ds
-
 def build_flag(ds_input, ds_output, config_data):
 #    flag_aot = ds_input.rtoa.max(dim="bands") >= config_data.getfloat("Coefficients", "aotmax")
-    flag_aot = np.max(ds_input['TOA'], axis=0) >= config_data.getfloat("Coefficients", "aotmax")
+    flag_aot = np.max(ds_input['TOA'], axis=0) >= config_data.getfloat("aotmax")
 #    flag_toc_min = ds_output.rtoc_run.min(dim="bands") < config_data.getfloat("Coefficients", "tocmin")
-    flag_toc_min = np.min(ds_output['rTOC'], axis=0) < config_data.getfloat("Coefficients", "tocmin")
+    _flag_toc_min = np.min(ds_output['rTOC'], axis=0) < config_data.getfloat("tocmin")
 #    flag_toc_max = ds_output.rtoc_run.max(dim="bands") > config_data.getfloat("Coefficients", "tocmax")
-    flag_toc_max = np.max(ds_output['rTOC'], axis=0) > config_data.getfloat("Coefficients", "tocmax")
+    _flag_toc_max = np.max(ds_output['rTOC'], axis=0) > config_data.getfloat("tocmax")
 #    flag_sza_max = ds_input.tetas > config_data.getfloat("Coefficients", "szamax")
-    flag_sza_max = ds_input['SZA'] > config_data.getfloat("Coefficients", "szamax")
-    flag_aot_grad = ds_output['aod_grad'] > config_data.getfloat("Coefficients", "aod_max_grad")
+    flag_sza_max = ds_input['SZA'] > config_data.getfloat("szamax")
+    flag_aot_grad = ds_output['aod_grad'] > config_data.getfloat("aod_max_grad")
     flag_cloud = ds_input['clm'] != 0 # cloud contaminated flag
 #    flag = ((flag_aot.data.astype(np.int16) << 0) | #lsb
 #            (flag_toc_min.data.astype(np.int16) << 1) |
@@ -234,7 +88,7 @@ def build_flag(ds_input, ds_output, config_data):
     )
     return flag
 
-def compute_atmospheric_transmissions(cos_sun, cos_view,
+def compute_atmospheric_transmissions(cos_sun,
                                     aot_550, pressure_eq,
                                     smac_coeffs, ca_ind):
     """
@@ -242,7 +96,6 @@ def compute_atmospheric_transmissions(cos_sun, cos_view,
     
     Args:
         cos_sun: Cosine of solar zenith angle
-        cos_view: Cosine of view zenith angle
         aot_550: Aerosol optical thickness at 550nm
         pressure_eq: Equivalent pressure (normalized by 1013 hPa)
         smac_coeffs: SMAC coefficient array
@@ -515,46 +368,6 @@ def read_smac_coefficients(filepath, exclude_first_field=True, verbose=False):
     
     return ca_, ca_ind
 
-def closest_model(image_data, lut_data):
-    # distance compute https://www.mdpi.com/2227-7390/12/23/3787 3.2.5. Parallelization as of 21/07/2025
-    pixels = image_data.T 
-    lut = lut_data  
-    lut_norms = np.sum(lut.T ** 2, axis=1) 
-    pixel_norms = np.sum(pixels ** 2, axis=1)[:, np.newaxis] 
-    dot_products = pixels @ lut
-    distances = pixel_norms + lut_norms - 2 * dot_products 
-    
-    indices = np.argmin(distances, axis=1).astype(np.uint8)
-
-    return indices
-
-def closest_model_optimized(image_data, lut_data):
-    pixels = image_data.T 
-    lut = lut_data  
-    lut_norms = np.sum(lut.T ** 2, axis=1) 
-#    pixel_norms = np.sum(pixels ** 2, axis=1)[:, np.newaxis] 
-    dot_products = pixels @ lut
-    distances = lut_norms - 2 * dot_products 
-    
-    indices = np.argmin(distances, axis=1).astype(np.uint8)
-
-    return indices
-
-def closest_model_pixelwise(image_data, lut_data):
-    pixels = image_data.T 
-#    lut = lut_data.astype(np.float32)
-    lut_norms = np.sum(lut_data.T ** 2, axis=1) 
-    nb_pixels = pixels.shape[0]
-    indices = np.zeros((nb_pixels), dtype=np.uint8)
-    for i in range(nb_pixels):
-        pixel = pixels[i]
-        pixel_norm = np.sum(pixel ** 2).astype(np.float32)
-        dot_products = pixel @ lut_data
-        distances = pixel_norm + lut_norms - 2 * dot_products 
-        indices[i] = np.argmin(distances).astype(np.uint8)
-
-    return indices
-
 def closest_model_low(image_data, lut_data):
     pixels = image_data.T
     indices = np.zeros((pixels.shape[0],), dtype=np.uint8)
@@ -682,7 +495,7 @@ def get_iaer(data):
               'oc': 'OC_FRAC', 'ssalt': 'SS_FRAC', 
               'bc': 'BC_FRAC'}
     # Load aerosol models
-    frac_aer_model, rh_aer_model, Ha_aer_model = pre_aer_models(faer, match)
+    frac_aer_model, _rh_aer_model, _Ha_aer_model = pre_aer_models(faer, match)
     # Get shape and flatten TOTEXTTAU once
     totexttau = data["TOTEXTTAU"]
     shp = totexttau.shape
@@ -719,24 +532,6 @@ def get_mensual_faers(date):
         path = base.format(f"{i:02}", yyyymm)
         paths.append(path)
     return paths
-
-#date_time = dsProbav["mean-time"]
-# latitude = dsProbav.lat
-# longitude = dsProbav.lon
-
-def open_monthly_aerosol(date_time):
-    print("Loading monthly aerosol data...")
-    if int(str(date_time.values)[:4]) <= 2017:
-        date = str(date_time.values)[0:4]+str(date_time.values)[5:7]
-    else:
-        date = "2017"+str(date_time.values)[5:7]
-    dsMensualAERs = []
-    for aer_path in get_mensual_faers(date): 
-        dsMensualAER = xr.open_dataset(aer_path, chunks={"lat" : -1, "lon" : -1, "time" : 1})
-        dsMensualAER = dsMensualAER[["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", 
-                                     "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]].astype(np.float32)
-        dsMensualAERs.append(dsMensualAER)
-    return dsMensualAERs
 
 def preload_monthly_aerosol(date_time):
     """
@@ -798,7 +593,6 @@ def _load_or_compute_terrain(latitude, longitude, dsDEM):
 #    file_name.parent.mkdir(parents=True, exist_ok=True)
     
     elev = interp(dsDEM["elev"], lat=Linear(latitude), lon=Linear(longitude))
-    delev = interp(dsDEM["Delev"], lat=Linear(latitude), lon=Linear(longitude))
     slope = xdem_terrain.slope(elev.values, resolution=10)
     aspect = xdem_terrain.aspect(elev.values)
     slope = slope.astype(np.float32)
@@ -808,9 +602,7 @@ def _load_or_compute_terrain(latitude, longitude, dsDEM):
     terrain_ds = xr.Dataset(
         {
 #            "elev": (["y", "x"], elev.transpose().data.astype(np.float32)),
-#            "delev": (["y", "x"], delev.transpose().data.astype(np.float32)),
             "elev": (["y", "x"], elev.data.astype(np.float32)),
-            "delev": (["y", "x"], delev.data.astype(np.float32)),
             "slope": (["y", "x"], slope),
             "aspect": (["y", "x"], aspect),
         },
@@ -819,6 +611,120 @@ def _load_or_compute_terrain(latitude, longitude, dsDEM):
     #terrain_ds.to_netcdf(file_name)
     
     return terrain_ds
+
+
+def compute_delta_elevation_from_elev(
+    elev,
+    spatial_resolution_m,
+    geolocation_error_pixels=0.5,
+    slope_window=3,
+):
+    """
+    Compute delta elevation from elevation and local maximum slope.
+
+    The altitude error is estimated from a geolocation error expressed in
+    pixels and a local maximum terrain slope:
+    delta_z = (geolocation_error_pixels * spatial_resolution_m) * tan(slope_max)
+    """
+    elev_arr = np.asarray(elev, dtype=np.float32)
+    valid = np.isfinite(elev_arr)
+    if not np.any(valid):
+        return np.full(elev_arr.shape, np.nan, dtype=np.float32)
+
+    fill_value = np.nanmedian(elev_arr[valid]).astype(np.float32)
+    filled = elev_arr.copy()
+    filled[~valid] = fill_value
+
+    slope_deg = xdem_terrain.slope(filled, resolution=float(spatial_resolution_m)).astype(np.float32)
+    slope_tan = np.tan(np.radians(np.clip(slope_deg, 0.0, 89.9))).astype(np.float32)
+    slope_window = max(1, int(slope_window))
+    slope_max = maximum_filter(slope_tan, size=slope_window, mode="nearest")
+
+    geolocation_error_m = float(geolocation_error_pixels) * float(spatial_resolution_m)
+    delev = geolocation_error_m * slope_max
+    delev = delev.astype(np.float32)
+    delev[~valid] = np.nan
+    return delev
+
+
+def _kg_multiplier_from_zone_code(zone_code):
+    code = (zone_code or "").strip()
+    if code in {"Ocean", "EF", "ET"}:
+        return 0.7
+    if code.startswith("B"):
+        return 1.5
+    if code.startswith("A"):
+        return 1.4
+    if code.startswith("C") or code.startswith("D"):
+        return 1.3
+    return 1.0
+
+
+def load_koppen_geiger_zone_multipliers(mapping_file):
+    """Load zone-number to AOD uncertainty multiplier mapping."""
+    zone_to_multiplier = {}
+    with open(mapping_file, newline="", encoding="utf-8") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            zone_num = int(row["zoneNum"])
+            zone_code = row.get("kg_zone", "")
+            zone_to_multiplier[zone_num] = _kg_multiplier_from_zone_code(zone_code)
+    return zone_to_multiplier
+
+
+def sample_koppen_geiger_multiplier(lat, lon, kg_dataset, zone_to_multiplier, default=1.0):
+    """
+    Sample Köppen-Geiger classes at lat/lon and convert them to multipliers.
+    """
+    lat_arr = np.asarray(lat, dtype=np.float64)
+    lon_arr = np.asarray(lon, dtype=np.float64)
+    out = np.full(lat_arr.shape, float(default), dtype=np.float32)
+
+    valid = np.isfinite(lat_arr) & np.isfinite(lon_arr)
+    if not np.any(valid):
+        return out
+
+    if rasterio is None or kg_dataset is None:
+        return out
+
+    rows, cols = rasterio.transform.rowcol(
+        kg_dataset.transform,
+        lon_arr[valid],
+        lat_arr[valid],
+        op=np.floor,
+    )
+    rows = np.asarray(rows, dtype=np.int64)
+    cols = np.asarray(cols, dtype=np.int64)
+
+    inside = (
+        (rows >= 0) & (rows < kg_dataset.height) &
+        (cols >= 0) & (cols < kg_dataset.width)
+    )
+    if not np.any(inside):
+        return out
+
+    r0 = int(rows[inside].min())
+    r1 = int(rows[inside].max())
+    c0 = int(cols[inside].min())
+    c1 = int(cols[inside].max())
+
+    window = rasterio.windows.Window(c0, r0, c1 - c0 + 1, r1 - r0 + 1)
+    zones_window = kg_dataset.read(1, window=window)
+    z_rows = rows[inside] - r0
+    z_cols = cols[inside] - c0
+    zone_values = zones_window[z_rows, z_cols].astype(np.int64)
+
+    sampled = np.fromiter(
+        (zone_to_multiplier.get(int(z), float(default)) for z in zone_values),
+        dtype=np.float32,
+        count=zone_values.size,
+    )
+
+    valid_flat = np.flatnonzero(valid)
+    target_flat = valid_flat[inside]
+    out_flat = out.ravel()
+    out_flat[target_flat] = sampled
+    return out
 
 def _stack_viewing_angles(vnir_angle, swir_angle):
     return np.stack([vnir_angle, vnir_angle, swir_angle, swir_angle])
@@ -855,8 +761,7 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
         
         # Compute atmospheric transmissions
         T, Tdir, Tdif = compute_atmospheric_transmissions(
-            np.cos(np.radians(mtetas)), 
-            np.cos(np.radians(mtetav[b])),
+            np.cos(np.radians(mtetas)),
             mTOTEXTTAU, 
             mpression, 
             ca_final, 
@@ -865,7 +770,8 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
 
         # Calculate error
         # Precompute denominator components
-        term1 = Tdir * mui / mus
+        # When surface faces away from sun (mui < 0), direct term contributes nothing
+        term1 = np.where(mui > 0, Tdir * mui / mus, 0.0)
 
         term2 = Tdif * fsky
 
@@ -896,54 +802,4 @@ def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize, 
 
     return slope_err(ds_probav, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer)
 
-def convolution_err(input_data: np.ndarray, size: int = 5, sigma: float = 0.9) -> np.ndarray:
-    """
-    Calculate error from adjacent pixels using Gaussian convolution.
-    Uses a 5x5 matrix filled with a Gaussian at 99% at 2.5 pixels then normalized.
-    """
-    ax = np.arange(size) - (size // 2)
-    xx, yy = np.meshgrid(ax, ax)
-    kernel = (1.0 / (2 * np.pi * sigma ** 2)) * np.exp(-(xx ** 2 + yy ** 2) / (2 * sigma ** 2))
-    kernel /= kernel.sum()
-    convolved = convolve2d(np.where(np.isnan(input_data), 0, input_data), kernel, mode='same', boundary='fill')
-    
-    return np.abs(input_data - convolved)
-
-if __name__ == '__main__':
-#    probav_folder = config.probav_path
-    k_p0 = 1e-2
-
-    probav_folder = '/mnt/ceph/proj/FDR4VGT/input/probav'
-    dsProbav = probav.read_ProbaV(probav_folder, 1000).isel(y=slice(1000, 1100), x=slice(1000,1100))
-
-#    coef_path = Path(config.smac_coef_path) / f"{config.sensor}_smac_coeffs_v3.0.npy"
-#    ca_, ca_ind = read_smac_coefficients(coef_path)
-
-    latitude = dsProbav.lat
-    longitude = dsProbav.lon
-    date_time = dsProbav["mean-time"]
-    SHAPE = (len(latitude.y), len(latitude.x))
-    bands_count = 4
-
-#    aer_file = f"{config.path_aer}/MERRA2_400.tavg1_2d_aer_Nx.20141111.nc4"
-#    slv_file = f"{config.path_slv}/MERRA2_400.tavg1_2d_slv_Nx.20141111.nc4"
-    slv_file = '/archive2/data/MERRA2/surf_pression_water_vapor/2014/MERRA2_400.tavg1_2d_slv_Nx.20141111.nc4'
-
-#    dsAER =  xr.open_dataset(aer_file, chunks={"lat" : -1, "lon" : -1, "time" : 1})
-#    dsAER = dsAER[["TOTEXTTAU", "SUEXTTAU", "DUEXTTAU", "OCEXTTAU", "SSEXTTAU", "BCEXTTAU"]].compute()
-#    faer = get_aer_interpolated(dsAER, Linear(latitude), Linear(longitude), Linear(date_time)).transpose()
-
-    dsSLV = xr.open_dataset(slv_file, chunks={"lat" : -1, "lon" : -1, "time" : 1})
-    dsSLV = dsSLV[["TQV", "TO3", "SLP"]].compute()
-    # uh2o = interp(dsSLV["TQV"] * config.k_uh2o, lat=Linear(latitude), lon=Linear(longitude), time=Linear(date_time)).T
-    # uo3 = interp(dsSLV["TO3"] * config.k_uo3, lat=Linear(latitude), lon=Linear(longitude), time=Linear(date_time)).T
-    pression = interp(dsSLV["SLP"] * k_p0, lat=Linear(latitude), lon=Linear(longitude), time=Linear(date_time)).T
-
-    iaer_month, mean_totex_month, std_totex_month = calculate_monthly_aerosol(date_time, latitude, longitude)
-
-    iaer_run = iaer_month[0] #FOR THE EXAMPLE
-
-    err = get_slope_err(dsProbav, faer.TOTEXTTAU.values, pression.values, ca_, ca_ind, iaer_run)
-
-    #convolution_err(rtoc run (band by band))
-    print()
+pass

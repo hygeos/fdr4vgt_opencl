@@ -1,9 +1,9 @@
 ---
 title: "FDR4VGT Atmospheric Correction"
-subtitle: "Algorithm Theoretical Basis Document — Extended (v1.1)"
+subtitle: "Algorithm Theoretical Basis Document (v1.1)"
 version: "1.1"
 reference: FDR4VGT-processing-AC-ATBD_v1.1
-client: C3S
+client: ESA
 contrat: FDR4VGT_XXXXXX
 date: today
 author:
@@ -12,17 +12,26 @@ author:
 format:
   docx:
     reference-doc: ../FDR4VGT-AC-ATBD_v1.0.docx
+    prefer-html: false
   pdf:
     pdf-engine: xelatex
     template: _extensions/hygeos/resources/templates/hygeos-template.tex
 
+jupyter: fdr4vgt
+
 toc: true
-number-sections: true
+number-sections: false
+number-equations: true
 fontsize: 11pt
 ---
 
-> Date: 15/01/2026
->
+# FDR4VGT processing, {.unnumbered .unlisted}
+
+## Atmospheric Correction ATBD {.unnumbered .unlisted}
+
+**Date Issued:** 23.07.2026\
+**Issue:** I1.1
+
 > Ref: FDR4VGT-processing-AC-ATBD_v1.1
 >
 > Contract No : FDR4VGT_XXXXXX
@@ -51,23 +60,17 @@ Related documents
 |:------------------------------|
 | **Reference ID** **Document** |
 
-------------------------------------------------------------------------
-
 **Output**
 
 |                               |
 |:------------------------------|
 | **Reference ID** **Document** |
 
-------------------------------------------------------------------------
-
 **External documents**
 
 |                               |
 |:------------------------------|
 | **Reference ID** **Document** |
-
-------------------------------------------------------------------------
 
 \*\*\*\*
 
@@ -301,7 +304,7 @@ The GTOPO30 (Global 30 Arc-Second Elevation) dataset is used for assigning a sur
 
 - Dimensions of 21,600 rows and 43,200 columns. The horizontal coordinate system is decimal degrees of latitude and longitude referenced to WGS84.
 
-- The vertical units represent elevation above mean sea level (elev) and are expressed in meters. The values range from -407 to 8,752. It is complemented by the spatial standard deviation of the altitude (Delev in meters) computed in 3x3 pixel boxes.
+- The vertical units represent elevation above mean sea level (elev) and are expressed in meters. The values range from -407 to 8,752.
 
 **Specifications:**
 
@@ -309,16 +312,16 @@ The GTOPO30 (Global 30 Arc-Second Elevation) dataset is used for assigning a sur
 - Coverage: Global (-90° to +90° lat, -180° to +180° lon)
 - Dimensions: 21,600 rows × 43,200 columns
 - Vertical range: -407 to +8,752 m above mean sea level
-- Additional field: **Delev** - standard deviation of altitude computed in 3×3 pixel boxes (proxy for geolocation uncertainty impact)
+- Derived field in processing: **Delev** - altitude uncertainty estimated from local maximum slope and geolocation error.
 
 **Usage:**
 
 ```         
 z = elev(lat, lon)           # Surface elevation
-Δz = Delev(lat, lon)         # Elevation uncertainty
+Δz = 0.5 * pixel_size * tan(max_local_slope)  # Elevation uncertainty
 ```
 
-> **Implementation Note (v1.1):** the implementation uses **linear interpolation** (via `scipy.interpolate.RegularGridInterpolator`) to sample `elev`/`Delev` at the satellite grid, rather than nearest-neighbor. This is a reasonable improvement, giving smoother elevation transitions at tile boundaries; the impact is negligible given the 90 m GTOPO30 resolution versus \~1 km VGT pixels. The global DEM is also cropped to the product's lat/lon extent before loading (\~1.9 GB → \~0.2 GB), see Appendix D.1.
+> **Implementation Note:** the implementation uses **linear interpolation** (via `scipy.interpolate.RegularGridInterpolator`) to sample `elev` at the satellite grid, then derives `Delev` from `elev` only using a local maximum slope and a geolocation uncertainty of **0.5 pixel** multiplied by the sensor spatial resolution. This replaces reliance on an external DEM-provided `Delev` layer. The global DEM is also cropped to the product's lat/lon extent before loading (\~1.9 GB → \~0.2 GB), see Appendix D.1.
 
 ## MERRA-2 Reanalysis Products
 
@@ -438,9 +441,7 @@ This product gives a background BRDF shape to estimate the surface BRDF effects 
 
 Computing and spatially interpolate from them two normalized parameters $k_{1}^{p}\ and\ k_{2}^{p}$.
 
-$$k_{1}^{p} = \ \frac{k_{1}}{k_{0}}\ ;\ k_{2}^{p} = \ \frac{k_{2}}{k_{0}}$$
-
-# Atmospheric corrections algorithm
+$$k_{1}^{p} = \ \frac{k_{1}}{k_{0}}\ ;\ k_{2}^{p} = \ \frac{k_{2}}{k_{0}}$$ {#eq-eq1} \# Atmospheric corrections algorithm
 
 ## SMAC Algorithm Overview
 
@@ -468,13 +469,11 @@ This approach is justified by increasing **accuracy** of the Reanalysis datasets
 
 All the parametrization is contained in the SMAC coefficients.
 
-+-------+-------------------------------------------------------------------------------------------------------------------+-------+
-|       | $$T = T_{g}\left( \theta_{s},\theta_{v} \right)T_{sca}\left( \theta_{s} \right)T_{sca}\left( \theta_{v} \right)$$ | \(1\) |
-+=======+:==================================================================================================================+:======+
-|       | $$R = R_{toa} - R_{atm}\left( \theta_{s},\theta_{v},\Delta\Phi \right)T_{g}\left( \theta_{s},\theta_{v} \right)$$ | \(2\) |
-+-------+-------------------------------------------------------------------------------------------------------------------+-------+
-|       | $$R_{toc}\left( \theta_{s},\theta_{v},\Delta\Phi \right) = \frac{R}{T + s_{atm}R}$$                               | \(3\) |
-+-------+-------------------------------------------------------------------------------------------------------------------+-------+
+$$T = T_{g}\left( \theta_{s},\theta_{v} \right)T_{sca}\left( \theta_{s} \right)T_{sca}\left( \theta_{v} \right)$$ {#eq-eq2}
+
+$$R = R_{toa} - R_{atm}\left( \theta_{s},\theta_{v},\Delta\Phi \right)T_{g}\left( \theta_{s},\theta_{v} \right)$$ {#eq-eq3}
+
+$$R_{toc}\left( \theta_{s},\theta_{v},\Delta\Phi \right) = \frac{R}{T + s_{atm}R}$$ {#eq-eq4}
 
 Where:
 
@@ -498,33 +497,19 @@ It is possible to derive the atmospherically corrected TOC directional reflectan
 
 The radiometric uncertainty of the TOA reflectance is$\ \mathrm{\Delta}R_{toa}$. The resulting uncertainty about the TOC directional reflectance$\ \mathrm{\Delta}_{R_{toc}}^{R_{toa}}$, is obtained:
 
-+-------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                               |
-+:=============================================================================================================================:+
-| $$\mathrm{\Delta}_{R_{toc}}^{R_{toa}} = \left| \frac{\partial R_{toc}}{\partial R_{toa}}.\mathrm{\Delta}R_{toa} \right|$$ (4) |
-+-------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\mathrm{\Delta}_{R_{toc}}^{R_{toa}} = \left| \frac{\partial R_{toc}}{\partial R_{toa}}.\mathrm{\Delta}R_{toa} \right|$$ {#eq-eq5}
 
 where $\frac{\partial R_{toc}}{\partial R_{toa}}$ is the sensitivity of TOC directional reflectance to any change in TOA reflectance. It is the Jacobian$\ J_{R_{toc}}^{R_{toa}}$.
 
 Within SMAC, it can be derived analytically:
 
-+----------------------------------------------------------------------------------------------------------+
-|                                                                                                          |
-+:========================================================================================================:+
-| $$J_{R_{toc}}^{R_{toa}} = \ \frac{\partial R_{toc}}{\partial R}\frac{\partial R}{\partial R_{toa}}$$ (5) |
-+----------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$J_{R_{toc}}^{R_{toa}} = \frac{\partial R_{toc}}{\partial R}\frac{\partial R}{\partial R_{toa}}$$ {#eq-eq6}
 
 after remarking that$\ \frac{\partial R}{\partial R_{toa}} = 1,$ and using Eqs. 2 and 3
 
-+----------+------------------------------------------+----------+
-|          | $$\eta = \frac{1}{({T + s}_{atm}\ R)}$$  | \(6\)    |
-+==========+:=========================================+:=========+
-|          | $$J_{R_{toc}}^{R_{toa}} = \eta^{2}\ T$$  | \(7\)    |
-+----------+------------------------------------------+----------+
+$$\eta = \frac{1}{({T + s}_{atm}\ R)}$$ {#eq-eq7}
+
+$$J_{R_{toc}}^{R_{toa}} = \eta^{2} T$$ {#eq-eq8}
 
 ### Sensitivity to Ozone and Water Vapor
 
@@ -532,81 +517,41 @@ The sensitivity of TOC directional reflectance to the uncertainty in the total c
 
 The uncertainty in the total column $U_{X}$ is propagated through the Jacobian$\ J_{R_{toc}}^{U_{X}}$.
 
-+-----------------------------------------------------------------------------------------------------+
-|                                                                                                     |
-+:===================================================================================================:+
-| $$\mathrm{\Delta}_{R_{toc}}^{U_{X}} = \left| J_{R_{toc}}^{U_{X}}.\mathrm{\Delta}U_{X} \right|$$ (8) |
-+-----------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\mathrm{\Delta}_{R_{toc}}^{U_{X}} = \left| J_{R_{toc}}^{U_{X}}.\mathrm{\Delta}U_{X} \right|$$ {#eq-eq9}
 
 Within SMAC, it can also be derived analytically.
 
 Let us recall the formulation of the transmission of the gas $T_{X}$:
 
-|                                                   |
-|:-------------------------------------------------:|
-| $${T_{X} = e}^{{{\ a_{X}(U}_{X}m)}^{n_{X}}}$$ (9) |
-
-------------------------------------------------------------------------
+$${T_{X} = e}^{{{\ a_{X}(U}_{X}m)}^{n_{X}}}$$ {#eq-eq10}
 
 where $a_{X}$ and $n_{X}$ are SMAC coefficients and m is the air mass:
 
-|                                                                  |
-|:----------------------------------------------------------------:|
-| $$m = \frac{1}{\cos\theta_{s}} + \frac{1}{\cos\theta_{v}}$$ (10) |
-
-------------------------------------------------------------------------
+$$m = \frac{1}{\cos\theta_{s}} + \frac{1}{\cos\theta_{v}}$$ {#eq-eq11}
 
 We decompose Jacobian into two parts:
 
-+--------------------------------------------------------------------------------------------------------------+
-|                                                                                                              |
-+:============================================================================================================:+
-| $$J_{R_{toc}}^{U_{X}} = \frac{\partial R_{toc}}{\partial T_{X}}.\frac{\partial T_{X}}{\partial U_{X}}$$ (11) |
-+--------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$J_{R_{toc}}^{U_{X}} = \frac{\partial R_{toc}}{\partial T_{X}}.\frac{\partial T_{X}}{\partial U_{X}}$$ {#eq-eq12}
 
 The sensitivity of $T_{X}$ to $U_{X}$ is:
 
-+------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                        |
-+:======================================================================================================================:+
-| $$\frac{\partial T_{X}}{\partial U_{X}} = {\left( \frac{a_{X}.n_{X}}{U_{X}} \right).{\ (U}_{X}m)}^{n_{X}}.T_{X}$$ (12) |
-+------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\frac{\partial T_{X}}{\partial U_{X}} = {\left( \frac{a_{X}.n_{X}}{U_{X}} \right).{\ (U}_{X}m)}^{n_{X}}.T_{X}$$ {#eq-eq13}
 
 The sensitivity of TOC directional reflectance to $T_{X}$ is obtained through Eqs. and using the decomposition${\ T}_{g} = T_{X}{\ .T}_{noX}$:
 
-+---------------------------------------------------------------------------------------+
-|                                                                                       |
-+:=====================================================================================:+
-| $$\frac{\partial R_{toc}}{\partial T_{X}} = {- \eta}^{2}\frac{TR_{toa}}{T_{X}}$$ (13) |
-+---------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\frac{\partial R_{toc}}{\partial T_{X}} = {- \eta}^{2}\frac{TR_{toa}}{T_{X}}$$ {#eq-eq14}
 
 ### Surface Pressure and AOT at 550 nm
 
 For the surface pressure ${\ P}_{s}$ and the AOT at 550 nm${\ \tau}_{a}^{550}$, we process the pixel two times more with small perturbations $\delta P_{s}$ and$\ \delta\tau_{a}^{550}$, and then derive the Jacobians using the finite differences:
 
-+--------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                      |
-+:====================================================================================================================================:+
-| $$J_{R_{toc}}^{P_{s}} = \frac{{R_{toc}\left( P_{s} \right) - \rho}_{toc}\left( P_{s} - \delta P_{s} \right)}{\delta P_{s}}\ ,$$ (14) |
-+--------------------------------------------------------------------------------------------------------------------------------------+
+$$J_{R_{toc}}^{P_{s}} = \frac{{R_{toc}\left( P_{s} \right) - \rho}_{toc}\left( P_{s} - \delta P_{s} \right)}{\delta P_{s}}$$ {#eq-eq15}
 
-------------------------------------------------------------------------
+$$\mathrm{\Delta}_{R_{toc}}^{P_{s}} = \left| J_{R_{toc}}^{P_{s}}.\mathrm{\Delta}P_{s} \right|$$ {#eq-eq16}
 
-+-------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+
-|       | $\mathrm{\Delta}_{R_{toc}}^{P_{s}} = \left| J_{R_{toc}}^{P_{s}}.\mathrm{\Delta}P_{s} \right|$,                                                                         | \(15\) |
-+=======+:=======================================================================================================================================================================+:=======+
-|       | $$J_{R_{toc}}^{\tau_{a}^{550}} = \frac{{R_{toc}\left( \tau_{a}^{550} \right) - R}_{toc}\left( \tau_{a}^{550} - \delta\tau_{a}^{550} \right)}{\delta\tau_{a}^{550}}\ $$ | \(16\) |
-+-------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+
-|       | $$\mathrm{\Delta}_{R_{toc}}^{\tau_{a}^{550}} = \left| J_{R_{toc}}^{\tau_{a}^{550}}.\mathrm{\Delta}\tau_{a}^{550} \right|$$                                             | \(17\) |
-+-------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+
+$$J_{R_{toc}}^{\tau_{a}^{550}} = \frac{{R_{toc}\left( \tau_{a}^{550} \right) - R}_{toc}\left( \tau_{a}^{550} - \delta\tau_{a}^{550} \right)}{\delta\tau_{a}^{550}}$$ {#eq-eq17}
+
+$$\mathrm{\Delta}_{R_{toc}}^{\tau_{a}^{550}} = \left| J_{R_{toc}}^{\tau_{a}^{550}}.\mathrm{\Delta}\tau_{a}^{550} \right|$$ {#eq-eq18}
 
 We use$\ \delta P_{s} = 10\ hPa,\ \delta\tau_{a}^{550} = 0.1\ \tau_{a}^{550}$. These values are chosen to provoke a sufficient response in the AC scheme and still stay in the linear regime
 
@@ -642,13 +587,11 @@ Table : List of AERONET sites used for validation
 
 The TOC directional reflectance for each spectral band j is obtained through the SMAC atmospheric correction:
 
-+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                                     |
-+:===================================================================================================================================================================================================:+
-| $$R_{toc}\left( \theta_{s},\theta_{v},\Delta\Phi \right) = f\left( R_{toa},T_{g},T_{sca},R_{atm},s_{atm};U_{H_{2}O},U_{O_{3}},P_{s},\tau_{a}^{550},aerosol\_ model \right) + \varepsilon_{0}$$ (18) |
-+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\begin{aligned}
+R_{toc}\left( \theta_{s},\theta_{v},\Delta\Phi \right)
+&= f\left( R_{toa},T_{g},T_{sca},R_{atm},s_{atm};U_{H_{2}O},U_{O_{3}},P_{s},\tau_{a}^{550},aerosol\_ model \right) \\
+&\quad + \varepsilon_{0}
+\end{aligned}$$ {#eq-eq19}
 
 Where:
 
@@ -680,22 +623,16 @@ Where:
 
 The total TOC reflectance uncertainty is derived from the measurement equation through uncertainty propagation:
 
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                                                                                                                                                                                               |
-$$
-u\left( R_{toc}^{j} \right) = \sqrt{
-\left( \frac{\partial R_{toc}^{j}}{\partial R_{toa}^{j}}u(R_{toa}^{j}) \right)^{2}
-+ \left( \frac{\partial R_{toc}^{j}}{\partial U_{H_2O}}u(U_{H_2O}) \right)^{2}
-+ \left( \frac{\partial R_{toc}^{j}}{\partial U_{O_3}}u(U_{O_3}) \right)^{2}
-+ \left( \frac{\partial R_{toc}^{j}}{\partial P_{S}}u(P_{S}) \right)^{2}
-+ \left( \frac{\partial R_{toc}^{j}}{\partial \tau_{a}^{550}}u\left( \tau_{a}^{550} \right) \right)^{2}
-+ \left( u\left( R_{toc}^{j} \right)_{ensemble} \right)^{2}
-+ \left( u\left( R_{toc}^{j} \right)_{RTM} \right)^{2}
-} + u^{2}(0)
-\qquad (19)
-$$
-
-------------------------------------------------------------------------
+$$u\left( R_{toc}^{j} \right) =
+\sqrt{\begin{aligned}
+&\left( \frac{\partial R_{toc}^{j}}{\partial R_{toa}^{j}}u(R_{toa}^{j}) \right)^{2}
++ \left( \frac{\partial R_{toc}^{j}}{\partial U_{H_2O}}u(U_{H_2O}) \right)^{2} \\
+&+ \left( \frac{\partial R_{toc}^{j}}{\partial U_{O_3}}u(U_{O_3}) \right)^{2}
++ \left( \frac{\partial R_{toc}^{j}}{\partial P_{S}}u(P_{S}) \right)^{2} \\
+&+ \left( \frac{\partial R_{toc}^{j}}{\partial \tau_{a}^{550}}u\left( \tau_{a}^{550} \right) \right)^{2}
++ \left( u\left( R_{toc}^{j} \right)_{ensemble} \right)^{2} \\
+&+ \left( u\left( R_{toc}^{j} \right)_{RTM} \right)^{2}
+\end{aligned}} + u^{2}(0)$$ {#eq-eq20}
 
 Where individual contributions include:
 
@@ -721,7 +658,7 @@ Following Popp and Mittaz (2022), each uncertainty source is characterized throu
 
 - Sensitivity coefficients
 
-### Effect 1: TOA Reflectance Uncertainty
+## TOA Reflectance Uncertainty
 
 +------------------------------+----------------------------------+----------------------------------------------+
 | Descriptor                   | Value                            | Notes                                        |
@@ -747,7 +684,7 @@ Following Popp and Mittaz (2022), each uncertainty source is characterized throu
 
 Table TOA reflectance uncertainty summary
 
-### Effect 2: Ozone Column Uncertainty
+## Ozone Column Uncertainty
 
 +------------------------------+-----------------------------------------+-------------------------------------------------------------+
 | Descriptor                   | Value                                   | Notes                                                       |
@@ -773,7 +710,7 @@ Table TOA reflectance uncertainty summary
 
 Table : Ozone uncertainty summary
 
-### Effect 3: Water Vapor Column Uncertainty
+## Water Vapor Column Uncertainty
 
 +------------------------------+--------------------------------------+--------------------------------------------+
 | Descriptor                   | Value                                | Notes                                      |
@@ -799,63 +736,47 @@ Table : Ozone uncertainty summary
 
 Table : Water vapor uncertainty summary
 
-### Effect 4: Surface Pressure Uncertainty {#effect-4-surface-pressure-uncertainty-1}
+## Surface Pressure Uncertainty {#effect-4-surface-pressure-uncertainty-1}
 
 The uncertainty on the surface pressure $P_{S}$ is due to the uncertainty on the meteorological sea level pressure P~0~ from MERRA-2 SLP parameter (very low, \<1 hPa), and the way the extrapolation to the altitude of the surface z is done. z is obtained through GTOPO30 elev, which has a resolution close to the targeted satellite product. The uncertainty in the mean altitude of the pixel is ∆*z*.
 
 The surface pressure *P~s~* is derived as:
 
-+----------+--------------------------------------------------+----------+
-|          | $$P_{S} = P_{0}\ e^{- \frac{g}{r\lambda}T^{'}}$$ | \(20\)   |
-+==========+:=================================================+:=========+
-|          | $$T^{'} = \ln(rT) - \ln(rT - r\lambda z)$$       | \(21\)   |
-+----------+--------------------------------------------------+----------+
+$$P_{S} = P_{0}\ e^{- \frac{g}{r\lambda}T^{'}}$$ {#eq-eq21}
+
+$$T^{'} = \ln(rT) - \ln(rT - r\lambda z)$$ {#eq-eq22}
 
 *Where T is the temperature above ground (from MERRA-2 T10M parameter), g* is Earth's gravity (9.80665 m.s^−2^), *r* is the gas constant for dry air (287.058 J.kg^−1^.K^−1^) and λ is the lapse rate *of the atmosphere, here taken* as −0.006 K.m^−1^ (*Van Besselaar et al., 2011*). The accuracy of this model depends on the variability of λ (typically ∆λ = 0.002 K.m^−1^). An uncertainty of $\mathrm{\Delta}_{P_{s}}^{\lambda}$\~1hPa could be assigned to this modeling error.
 
 However, the uncertainty in the geolocation could result in a significant uncertainty ∆z, especially in rough terrain. The latter error could be partly a random error and a pixel dependent bias.
 
-For example, if the geolocation error is purely random and isotropic, with a stable standard deviation, one may pre-calculate the standard deviation of the surface altitude as shown in Figure 2.
+For example, if the geolocation error is purely random and isotropic, with a stable standard deviation, one may estimate the altitude error from local terrain slope and geolocation error.
 
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                                                                                                                                                                                                                                                           |
-+:==========================================================================================================================================================================================================================================================================================================================================================================================================================+
-| ![](./media/media/image3.png){width="2.893700787401575in" height="2.425196850393701in"} ![](./media/media/image4.png){width="2.8976377952755907in" height="2.4606299212598426in"} |
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                                                                                                                                      |
++:=====================================================================================================================================================================================+
+| ![](./media/media/image3.png){width="2.893700787401575in" height="2.425196850393701in"} ![](./media/media/image4.png){width="2.8976377952755907in" height="2.4606299212598426in"} \| |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 
 Figure 2: Surface elevation (left) and local standard deviation of altitude (right), both in m, from GTOPO30.
 
-We implemented the computation of the local standard deviation of the surface altitude as an experimental auxiliary dataset within the DEM NetCDF file. The dataset named Delev has been computed from the convolution of elev with a gaussian averaging kernel with a parameter $\sigma$ = 0.5 (in GTOPO30 bin unit, e.g 30 arc second). This correpsonds to the geometric accuracy of SPOT/VGT (0.3 pixel)
+The implementation derives `Delev` directly from `elev` and local maximum slope, using a geolocation error of 0.5 pixel and the sensor spatial resolution:
+
+$$u(z) = \Delta z = \Delta r \cdot \tan\left(\theta_{\max}\right)$$
+
+where $\Delta r = 0.5 \times \text{pixel\_size}$ and $\theta_{\max}$ is the local maximum slope used for terrain uncertainty estimation.
 
 Finally, the uncertainty on P~s~ is:
 
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                               |
-+:=============================================================================================================================================================:+
-| $$u(P_{s}) = \sqrt{\left\lbrack \left( \mathrm{\Delta}_{P_{s}}^{\lambda} \right)^{2} + \left( \mathrm{\Delta}_{P_{s}}^{z} \right)^{2} \right\rbrack/2}$$ (22) |
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$u(P_{s}) = \sqrt{\left\lbrack \left( \mathrm{\Delta}_{P_{s}}^{\lambda} \right)^{2} + \left( \mathrm{\Delta}_{P_{s}}^{z} \right)^{2} \right\rbrack/2}$$ {#eq-eq23}
 
 with
 
-+--------------------------------------------------------------------------+
-|                                                                          |
-+:========================================================================:+
-| $$\mathrm{\Delta}_{P_{s}}^{z} = \left| J_{P_{s}}^{z}.u(z) \right|$$ (23) |
-+--------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\mathrm{\Delta}_{P_{s}}^{z} = \left| J_{P_{s}}^{z}.u(z) \right|$$ {#eq-eq24}
 
 and
 
-|                                                            |
-|:----------------------------------------------------------:|
-| $$J_{P_{s}}^{z} = - \frac{gP_{S}}{r(T - \lambda z)}$$ (24) |
-
-------------------------------------------------------------------------
+$$J_{P_{s}}^{z} = - \frac{gP_{S}}{r(T - \lambda z)}$$ {#eq-eq25}
 
 +------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
 | Descriptor                   | Value                                                                                    | Notes                                                                                |
@@ -874,7 +795,7 @@ and
 +------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
 | PDF shape                    | Gaussian                                                                                 |                                                                                      |
 +------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Magnitude                    | u(Ps) = √\[($\mathrm{\Delta}_{P_{s}}^{\lambda}$)² + ($\mathrm{\Delta}_{P_{s}}^{z}$)²\]/2 | $\mathrm{\Delta}_{P_{s}}^{\lambda}$ \~1 hPa, $\mathrm{\Delta}_{P_{s}}^{z}$from Delev |
+| Magnitude                    | u(Ps) = √\[($\mathrm{\Delta}_{P_{s}}^{\lambda}$)² + ($\mathrm{\Delta}_{P_{s}}^{z}$)²\]/2 | $\mathrm{\Delta}_{P_{s}}^{\lambda}$ \~1 hPa, $\mathrm{\Delta}_{P_{s}}^{z}$ from derived $\Delta z$ |
 +------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
 | Sensitivity                  | c₄ = ∂Rtoc/∂Ps                                                                           | Finite difference: δPs = 10 hPa                                                      |
 +------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
@@ -883,7 +804,7 @@ Table : Surface pressure uncertainty summary
 
 > **Critical Implementation Note (v1.1):** the computation of $T^{'} = \ln(rT) - \ln(rT - r\lambda z)$ overflows in float16 for typical temperatures ($T \approx 290$ K, $rT \approx 83246$, which exceeds the float16 maximum of 65504), producing NaN pressure and NaN Rtoc. The implementation therefore stores and processes `SLP` and `T10M` as **float32** in the ancillary cache (`_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}`). See Appendix D.2 for details.
 
-### Effect 5: Aerosol Optical Depth Uncertainty
+### Aerosol Optical Depth Uncertainty
 
 Quantifying aerosol optical depth (AOD) uncertainty in global chemical transport models (CTMs) remains critical for climate and air quality applications. Recent studies have highlighted systematic biases and uncertainties in leading reanalysis products such as CAMS and MERRA-2.
 
@@ -895,13 +816,11 @@ The community is moving toward probabilistic frameworks that explicitly quantify
 
 The AOD uncertainties (Root Mean Square Errors) could be assigned on a regional scale using a climate type classification map like the one used in Gueymard and Yang 2020. Years of AOD \@550 and Angström exponent 3-hourly datasets from MERRA-2 and CAMS have been evaluated at 793 AERONET stations. The validation was conducted based on continents and Köppen-Geiger classification (see Figure 3).
 
-+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                           |
-+:==========================================================================================================================================================+
-| ![](./media/media/image5.png){width="5.479861111111111in" height="3.6in"} |
-+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
++------------------------------------------------------------------------------+
+|                                                                              |
++:=============================================================================+
+| ![](./media/media/image5.png){width="5.479861111111111in" height="3.6in"} \| |
++------------------------------------------------------------------------------+
 
 Figure : Map of Köppen-Geiger climate classification
 
@@ -909,9 +828,7 @@ Figure : Map of Köppen-Geiger climate classification
 
 Based on the Gueymard and Yang findings, a practical operational uncertainty predictor can be formulated as:
 
-$$\sigma\left( \tau_{a}^{550} \right) = \max\left( \sigma_{base},\sigma_{relative} \times \tau_{a}^{550} \right)$$
-
-Where:
+$$\sigma\left( \tau_{a}^{550} \right) = \max\left( \sigma_{base},\sigma_{relative} \times \tau_{a}^{550} \right)$$ {#eq-eq26} Where:
 
 \- σ~base~ = 0.03 (clean atmosphere baseline)
 
@@ -923,7 +840,7 @@ This is justified by the following arguments
 
 \- Moderate-high AOD (τ~a~ ≥ 0.2): Scales with aerosol loading → 15% uncertainty
 
-We intend in an **updated version** to apply Köppen-Geiger climate classification multipliers:
+Köppen-Geiger climate classification multipliers are applied operationally to the AOD uncertainty term:
 
 +----------------------+----------------+----------------------------+
 | Region Type          | Multiplier     | Example Locations          |
@@ -956,12 +873,12 @@ We intend in an **updated version** to apply Köppen-Geiger climate classificati
 +------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
 | PDF shape                    | Skewed Gaussian (log-normal for high AOD)                                            |                                     |
 +------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Magnitude                    | σ(τ~a~⁵⁵⁰) = max(0.03, 0.15×τ~a~⁵⁵⁰), and optionally regional multipliers (see text) | Based on Gueymard & Yang validation |
+| Magnitude                    | σ(τ~a~⁵⁵⁰) = max(0.03, 0.15×τ~a~⁵⁵⁰) × M~KG~ | $M_{KG}$ from Köppen-Geiger class |
 +------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
 
 Table AOD550 uncertainty summary
 
-### Effect 6: Aerosol Model Selection Uncertainty
+## Aerosol Model Selection Uncertainty
 
 The SMAC coefficients are computed by an in-house radiative transfer model depending on the aerosol mixture (see section 9)
 
@@ -973,13 +890,11 @@ The SMAC coefficients are computed by an in-house radiative transfer model depen
 
 So, it is possible simply to choose a couple of aerosol models that fit best with the MERRA-2 data and run SMAC-CL on an ensemble of models. We rely here on the AMIP dataset (see section 2.4) that yields an ensemble of 10 aerosols models globally monthly. An example is given in Figure 4 .
 
-+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                                             |
-+:============================================================================================================================================================================================================+
-| ![](./media/media/image6.png){width="5.0078740157480315in" height="7.437007874015748in"} |
-+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
++---------------------------------------------------------------------------------------------+
+|                                                                                             |
++:============================================================================================+
+| ![](./media/media/image6.png){width="5.0078740157480315in" height="7.437007874015748in"} \| |
++---------------------------------------------------------------------------------------------+
 
 Figure : SMAC Aerosol model index (0-147) reconstructed from the AMIP ensemble runs #1-10 for December 2010
 
@@ -1013,11 +928,11 @@ Figure : SMAC Aerosol model index (0-147) reconstructed from the AMIP ensemble r
 
 Table : Aerosol model uncertainty summary
 
-### Effect 7: Radiative Transfer Approximations
+## Radiative Transfer Approximations
 
 Three sources of RT approximation errors:
 
-#### 7a. Lambertian Surface Assumption
+### Lambertian Surface Assumption
 
 It is most important for NIR and strong aerosol loading (in that case uncertainty due to AOD dominating). The modelling of the effect and a way to estimate the uncertainty associated is described in section 8.5. The surface BRDF shape is modeled using two parameters ${\ k}_{1}^{p}$ and $k_{2}^{p}$, depending on spectral band.
 
@@ -1026,21 +941,22 @@ In the baseline run, the surface is supposed to be lambertian (in that case${\ k
 Difference in R~toc~ from the two runs gives an estimation of the BRDF effects.
 
 $u\left( R_{toc}^{j} \right)_{RTM\_BRDF} = \left( {\ k}_{1}^{p}=0,k_{2}^{p} =0 \right) - \left( {\ k}_{1}^{p} \neq 0, k_{2}^{p} \neq 0 \right)$
-+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------+
-| Descriptor   | Value                                                                                                                                                                | Notes                               |
-+:=============+:=====================================================================================================================================================================+:====================================+
-| Significance | Moderate (NIR, high AOD)                                                                                                                                             |                                     |
-+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------+
-| Maturity     | 1 - Initial assessment                                                                                                                                               | From 6S validation                  |
-+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------+
-| Magnitude    | \~1% for most cases                                                                                                                                                  | Up to 5% for strong BRDF + high AOD |
-+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------+
-| Mitigation   | Using BRDF shape included in the product (https://dast.copernicus-climate.eu/documents/satellite-albedo/D1.3.4-v2.0_ATBD_CDR_SA_MULTI_SENSOR_v2.0_PRODUCTS_v1.1.pdf) |                                     |
-+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------+
 
-Table : RTM Lambertian assumption uncertainty summary
++--------------+---------------------------------------+-------------------------------------+
+| Descriptor   | Value                                 | Notes                               |
++:=============+:======================================+:====================================+
+| Significance | Moderate (NIR, high AOD)              |                                     |
++--------------+---------------------------------------+-------------------------------------+
+| Maturity     | 1 - Initial assessment                | From 6S validation                  |
++--------------+---------------------------------------+-------------------------------------+
+| Magnitude    | \~1% for most cases                   | Up to 5% for strong BRDF + high AOD |
++--------------+---------------------------------------+-------------------------------------+
+| Mitigation   | Using BRDF included in the product \* |                                     |
++--------------+---------------------------------------+-------------------------------------+
 
-#### 7b. Terrain Slope Effects
+(\* https://dast.copernicus-climate.eu/documents/satellite-albedo/D1.3.4-v2.0_ATBD_CDR_SA_MULTI_SENSOR_v2.0_PRODUCTS_v1.1.pdf) Table : RTM Lambertian assumption uncertainty summary
+
+### Terrain Slope Effects
 
 Mountain areas, rough terrain, have been modelled and estimated through a simple model following [cesbio](https://www.cesbio.cnrs.fr/multitemp/2481/) (https://www.cesbio.cnrs.fr/multitemp/2481/)
 
@@ -1060,27 +976,26 @@ The slope_eff function computes the terrain-induced relative effect. Here are th
 
 - Cosine of solar zenith angle:
 
-$$\mu_{s} = cos\left( \theta_{s} \right)$$
+$$\mu_{s} = cos\left( \theta_{s} \right)$$ {#eq-eq27} - Cosine of terrain slope:
 
-- Cosine of terrain slope:
+$$\mu = cos(s)$$ {#eq-eq28} - Effective cosine of incidence angle on tilted surface:
 
-$$\mu = cos(s)$$
-
-- Effective cosine of incidence angle on tilted surface:
-
-$$\mu_{i} = \mu_{s} \cdot \mu + \sqrt{1 - \mu_{s}^{2}} \cdot \sqrt{1 - \mu^{2}} \cdot cos\left( \phi_{s} - \phi_{a} \right)$$
+$$\begin{aligned}
+\mu_{i} &= \mu_{s} \cdot \mu \\
+&\quad + \sqrt{1 - \mu_{s}^{2}} \cdot \sqrt{1 - \mu^{2}} \cdot cos\left( \phi_{s} - \phi_{a} \right)
+\end{aligned}$$ {#eq-eq29}
 
 - Sky view factor:
 
-$$f_{sky} = \frac{1 + \mu}{2}$$
+$$f_{sky} = \frac{1 + \mu}{2}$$ {#eq-eq30} - Ground view factor:
 
-- Ground view factor:
+$$f_{ground} = \frac{1 - \mu}{2}$$ {#eq-eq31} - Slope Error
 
-$$f_{ground} = \frac{1 - \mu}{2}$$
-
-- Slope Error
-
-$$slope_{eff} = \frac{T}{T_{dir} \cdot \frac{\mu_{i}}{\mu_{s}} + T_{dif} \cdot f_{sky} + T \cdot f_{ground} \cdot \rho_{env}}$$
+$$slope_{eff} = \frac{T}{
+T_{dir} \cdot \frac{\mu_{i}}{\mu_{s}}
++ T_{dif} \cdot f_{sky}
++ T \cdot f_{ground} \cdot \rho_{env}
+}$$ {#eq-eq32}
 
 - ${u\left( R_{toc}^{j} \right)}_{RTM - slope} = R_{toc}^{j}*(slope_{eff} - 1)$
 
@@ -1108,7 +1023,7 @@ $\rho_{env}:$ Average environment reflectance, (supposed here equal to pixel gro
 
 Table : RTM terrain effect uncertainty summary
 
-#### 7c. SMAC Polynomial Fitting Errors
+### SMAC Polynomial Fitting Errors
 
 The estimation of the uncertainty due to the SMAC fitting errors is presented in section 8.4
 
@@ -1194,7 +1109,7 @@ Current Implementation:
   - Impact: Significant for high-contrast scenes (coast, cloud edge)
   - Option: Implement semi-empirical adjacency correction
 
-> **Status update (v1.1):** Adjacency effects remain a **confirmed known limitation** (not corrected in the operational chain). Köppen-Geiger regional AOD uncertainty multipliers (Section 5.3.5) remain a **planned feature**: the classification data (`kg_zoneNumGueymard.csv`) is available in ANCILLARY, but the regional multipliers are not yet applied in `compute_urtoc()`. See Appendix D.3 for details.
+> **Status update:** Adjacency effects remain a **confirmed known limitation** (not corrected in the operational chain). Köppen-Geiger regional AOD uncertainty multipliers (Section 5.3.5) are now **implemented** and applied to the AOD uncertainty used in uncertainty propagation.
 
 ### Second-Order Effects (u²(0) term)
 
@@ -1386,69 +1301,42 @@ The baseline AC are run under the assumption of a lambertian surface. If the sha
 
 In the following, we restrict the description to a model with three parameters of the form:
 
-+---------------------------------------------------------------------------------------------+
-|                                                                                             |
-+:============================================================================================+
-| $\rho_{g}$*(θ~s~, θ~v~, ϕ) = k~0~ + k~1~F~1~(θ~s~, θ~v~, ϕ) + k~2~F~2~(θ~s~, θ~v~, ϕ)* (25) |
-+---------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\rho_{g}(\theta_{s}, \theta_{v}, \phi) = k_{0} + k_{1}F_{1}(\theta_{s}, \theta_{v}, \phi) + k_{2}F_{2}(\theta_{s}, \theta_{v}, \phi)$$ {#eq-eq33}
 
 While *k~0~* quantifies an isotropic contribution to the reflectance factor *F~0~*=1, functions *F~1~* and *F~2~* represent the angular distribution related to geometric and volumetric surface scattering processes, respectively. Lucht et al. (2000) suggest the RossThick-LiSparse-Reciprocal model (simply referred to as the Ross-Li BRDF model) that results from the combination of two models for the definition of the volumetric (RossThick) and geometric (LiSparse-R) kernels. The geometric kernel is expressed as follows:
 
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                                                                                                                                        |
-+:=======================================================================================================================================================================================================================================================================================================+
-| $$F_{1}\left( \theta_{s}{,\theta}_{v},\phi \right) = O\left( \theta_{s}{,\theta}_{v},\phi \right) - sec\left( {\theta\ '}_{s} \right) - sec\left( {\theta\ }_{v}^{'} \right) + \frac{1}{2}\left( 1 + cos(\xi\ ') \right)\sec\left( {\theta\ '}_{s} \right)\sec\left( {\theta\ }_{v}^{'} \right)$$ (26) |
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$F_{1}\left( \theta_{s}{,\theta}_{v},\phi \right) = O\left( \theta_{s}{,\theta}_{v},\phi \right) - sec\left( {\theta\ '}_{s} \right) - sec\left( {\theta\ }_{v}^{'} \right) + \frac{1}{2}\left( 1 + cos(\xi\ ') \right)\sec\left( {\theta\ '}_{s} \right)\sec\left( {\theta\ }_{v}^{'} \right)$$ {#eq-eq34}
 
 Where,
 
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------+
-| $$O = \frac{1}{\pi}\left( t - sin(t)\cos(t) \right)\left( \sec\left( \theta_{s}^{\ '} \right) - sec\left( \theta_{v}^{\ '} \right) \right)$$                                                                         | \(27\)  |
-+:=====================================================================================================================================================================================================================+:========+
-| $$\cos{(t) = 2}\frac{\sqrt{D^{2} + \left( \tan\left( \theta_{s}^{\ '} \right)\tan\left( \theta_{v}^{\ '} \right)\sin(\phi) \right)^{2}}}{\sec\left( \theta_{s}^{\ '} \right) + sec\left( \theta_{v}^{\ '} \right)}$$ | \(28\)  |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------+
-| $$D = \sqrt{\tan^{2}\left( \theta_{s}^{\ '} \right) + \tan^{2}\left( \theta_{v}^{\ '} \right) - 2tan\left( \theta_{s}^{\ '} \right)\tan\left( \theta_{v}^{\ '} \right)\cos(\phi)}$$                                  | \(29\)  |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------+
-| $$\cos\left( \xi^{\ '} \right) = cos\left( \theta_{s}^{\ '} \right)\cos\left( \theta_{v}^{\ '} \right) + sin\left( \theta_{s}^{\ '} \right)\sin\left( \theta_{v}^{\ '} \right)\cos(\phi)$$                           | \(30\)  |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------+
-| $\theta_{s}^{\ '} = \tan^{- 1}\left( \frac{b_{RL}}{r}\tan\theta_{s} \right)$ and $\theta_{v}^{\ '} = \tan^{- 1}\left( \frac{b_{RL}}{r}\tan\theta_{v} \right)$                                                        | \(31\)  |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------+
+$$O = \frac{1}{\pi}\left( t - sin(t)\cos(t) \right)\left( \sec\left( \theta_{s}^{\ '} \right) - sec\left( \theta_{v}^{\ '} \right) \right)$$ {#eq-eq35}
+
+$$\cos(t) = 2\frac{\sqrt{D^{2} + \left( \tan\left( \theta_{s}^{\ '} \right)\tan\left( \theta_{v}^{\ '} \right)\sin(\phi) \right)^{2}}}{\sec\left( \theta_{s}^{\ '} \right) + sec\left( \theta_{v}^{\ '} \right)}$$ {#eq-eq36}
+
+$$D = \sqrt{\tan^{2}\left( \theta_{s}^{\ '} \right) + \tan^{2}\left( \theta_{v}^{\ '} \right) - 2tan\left( \theta_{s}^{\ '} \right)\tan\left( \theta_{v}^{\ '} \right)\cos(\phi)}$$ {#eq-eq37}
+
+$$\cos\left( \xi^{\ '} \right) = cos\left( \theta_{s}^{\ '} \right)\cos\left( \theta_{v}^{\ '} \right) + sin\left( \theta_{s}^{\ '} \right)\sin\left( \theta_{v}^{\ '} \right)\cos(\phi)$$ {#eq-eq38}
+
+$$\theta_{s}^{\ '} = \tan^{- 1}\left( \frac{b_{RL}}{r}\tan\theta_{s} \right),\quad
+\theta_{v}^{\ '} = \tan^{- 1}\left( \frac{b_{RL}}{r}\tan\theta_{v} \right)$$ {#eq-eq39}
 
 And the volumetric kernel is defined as:
 
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                                         |
-+:========================================================================================================================================================================================================+
-| $$F_{2}\left( \theta_{s}{,\theta}_{v},\phi \right) = \frac{\left( \frac{\pi}{2} - \xi \right)\cos(\xi) + sin(\xi)}{\cos\left( \theta_{s} \right) + cos\left( \theta_{v} \right)} - \frac{\pi}{4}$$ (32) |
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$F_{2}\left( \theta_{s}{,\theta}_{v},\phi \right) =
+\frac{\left( \frac{\pi}{2} - \xi \right)\cos(\xi) + sin(\xi)}{\cos\left( \theta_{s} \right) + cos\left( \theta_{v} \right)} - \frac{\pi}{4}$$ {#eq-eq40}
 
 Where
 
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                            |
-+:===========================================================================================================================================================================================+
-| $$\cos\left( \xi^{\ } \right) = cos\left( \theta_{s}^{\ } \right)\cos\left( \theta_{v}^{\ } \right) + sin\left( \theta_{s}^{\ } \right)\sin\left( \theta_{v}^{\ } \right)\cos(\phi)$$ (33) |
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\cos\left( \xi^{\ } \right) = cos\left( \theta_{s}^{\ } \right)\cos\left( \theta_{v}^{\ } \right)
++ sin\left( \theta_{s}^{\ } \right)\sin\left( \theta_{v}^{\ } \right)\cos(\phi)$$ {#eq-eq41}
 
 The choice is used here: *h/b~RL~*=2 and *b~RL~/r*=1.
 
 We can summarize the surface BRDF modelling as:
 
-+---------------------------------------------------------------------------------------------------+-----------+
-| $$\rho_{g} = k_{0}\left\lbrack 1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2} \right\rbrack$$                | \(34\)    |
-|                                                                                                   |           |
-| with $k_{1}^{p} = \frac{k_{1}}{k_{0}} ;\ k_{2}^{p} = \frac{k_{2}}{k_{0}}$ |           |
-+===================================================================================================+===========+
-|                                                                                                   |           |
-+---------------------------------------------------------------------------------------------------+-----------+
+$$\rho_{g} = k_{0}\left\lbrack 1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2} \right\rbrack$$ {#eq-eq42}
+
+with $k_{1}^{p} = \frac{k_{1}}{k_{0}} ;\ k_{2}^{p} = \frac{k_{2}}{k_{0}}$
 
 kp's are normalized coefficients that describe the departure from the lambertian reflector (in that case${\ k}_{1}^{p} = k_{2}^{p} = 0$**), this is the baseline processing**.
 
@@ -1458,129 +1346,96 @@ phic correction including BRDF effects
 
 In the case of a horizontally homogeneous target, the surface BRDF shape can be included through the 6S formulation (*Vermote et al., 1997*), and the atmospheric correction equations \[2-4\] are the same except that we have a modified total atmospheric transmission $T_{atm;g}$(*Ramon and Santer, 2001*):
 
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                                                                                                                                                                                                                                                            |
-+:===========================================================================================================================================================================================================================================================================================================================================================================================================================+
-| $$T_{atm;g} = \left( 1 - D\left( \mu_{v} \right) \right)\left( 1 - D\left( \mu_{s} \right) \right) + \frac{\overline{\rho_{g}}}{\rho_{g}}\left( 1 - D\left( \mu_{v} \right) \right)D\left( \mu_{s} \right) + \frac{\overline{\rho_{g}}'}{\rho_{g}}D\left( \mu_{v} \right)\left( 1 - D\left( \mu_{s} \right) \right) + \frac{\overline{\overline{\rho_{g}}}}{\rho_{g}}D\left( \mu_{v} \right)D\left( \mu_{s} \right)$$ (35) |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\begin{aligned}
+T_{atm;g} &= \left( 1 - D\left( \mu_{v} \right) \right)\left( 1 - D\left( \mu_{s} \right) \right)
++ \frac{\overline{\rho_{g}}}{\rho_{g}}\left( 1 - D\left( \mu_{v} \right) \right)D\left( \mu_{s} \right) \\
+&\quad + \frac{\overline{\rho_{g}}'}{\rho_{g}}D\left( \mu_{v} \right)\left( 1 - D\left( \mu_{s} \right) \right)
++ \frac{\overline{\overline{\rho_{g}}}}{\rho_{g}}D\left( \mu_{v} \right)D\left( \mu_{s} \right)
+\end{aligned}$$ {#eq-eq43}
 
 Where *D* is the ratio of diffuse over total transmission and $\ \overline{\rho_{g}}\ \ and\ \overline{\overline{\rho_{g}}}$ are single and double directional weighted averages of the surface BRDF. The weight is the atmospheric downward radiance$\ L_{atm}^{\downarrow}$ at the ground level:
 
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+
-| $$\overline{\rho_{g}} = \ \overline{\rho_{g}}(\theta_{s}{,\theta}_{v},\phi) = \ \frac{\int_{0}^{2\pi}{\int_{0}^{\frac{\pi}{2}}{\cos\theta^{'}L_{atm}^{\downarrow}\left( \theta_{s}{,\ \theta}^{'},\varphi^{'} \right)\rho_{g}\left( \theta^{'},\theta_{v},\varphi^{'} - \phi \right)\sin{\theta^{'}d\theta^{'}d\varphi^{'}}}}}{\int_{0}^{2\pi}{\int_{0}^{\frac{\pi}{2}}{\cos{\theta^{'}L_{atm}^{\downarrow}\left( \theta_{s}{,\ \theta}^{'},\varphi^{'} \right)}}}\sin{\theta^{'}d\theta^{'}d\varphi^{'}}}$$ | \(36\) |
-|                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |        |
-| ${\overline{\rho_{g}}}^{'}\left( \theta_{s}{,\theta}_{v},\phi \right)$= $\overline{\rho_{g}}(\theta_{v}{,\theta}_{s},\phi)$                                                                                                                                                                                                                                                                                                                                                                                  |        |
-|                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |        |
-| $$\overline{\overline{\rho_{g}}} = \ \overline{\overline{\rho_{g}}}\left( \theta_{s}{,\theta}_{v},\phi \right) = \ \overline{{\overline{\rho_{g}}}^{'}\left( \theta_{s}{,\theta}_{v},\phi \right)}$$                                                                                                                                                                                                                                                                                                         |        |
-+==============================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================+========+
-|                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |        |
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+
+$$\begin{aligned}
+\overline{\rho_{g}} &= \overline{\rho_{g}}(\theta_{s}{,\theta}_{v},\phi) \\
+&= \frac{\int_{0}^{2\pi}{\int_{0}^{\frac{\pi}{2}}{\cos\theta^{'}L_{atm}^{\downarrow}\left( \theta_{s}{,\ \theta}^{'},\varphi^{'} \right)\rho_{g}\left( \theta^{'},\theta_{v},\varphi^{'} - \phi \right)\sin{\theta^{'}d\theta^{'}d\varphi^{'}}}}}{\int_{0}^{2\pi}{\int_{0}^{\frac{\pi}{2}}{\cos{\theta^{'}L_{atm}^{\downarrow}\left( \theta_{s}{,\ \theta}^{'},\varphi^{'} \right)}}}\sin{\theta^{'}d\theta^{'}d\varphi^{'}}}
+\end{aligned}$$ {#eq-eq44}
+
+where ${\overline{\rho_{g}}}^{'}\left( \theta_{s}{,\theta}_{v},\phi \right) = \overline{\rho_{g}}(\theta_{v}{,\theta}_{s},\phi)$ and
+
+$$\overline{\overline{\rho_{g}}} = \overline{\overline{\rho_{g}}}\left( \theta_{s}{,\theta}_{v},\phi \right) = \overline{{\overline{\rho_{g}}}^{'}\left( \theta_{s}{,\theta}_{v},\phi \right)}$$ {#eq-eq45}
 
 The linearization of the ground reflectance allows the ground to derive depending on terms as a function of just kernel directional averages $\overline{F_{1}},\overline{F_{2}},\overline{\overline{F_{1}}},\overline{\overline{F_{2}}}$:
 
-+------------------------------------------------------------------------------------------------------------------------------------------------------+----------+
-| $$\overline{\rho_{g}} = k_{0}\left\lbrack 1 + k_{1}^{p}\overline{F_{1}} + k_{2}^{p}\overline{F_{2}} \right\rbrack,$$                                 | \(37\)   |
-|                                                                                                                                                      |          |
-| $$\overline{\overline{\rho_{g}}} = k_{0}\left\lbrack 1 + k_{1}^{p}\overline{\overline{F_{1}}} + k_{2}^{p}\overline{\overline{F_{2}}} \right\rbrack$$ |          |
-+======================================================================================================================================================+==========+
-|                                                                                                                                                      |          |
-+------------------------------------------------------------------------------------------------------------------------------------------------------+----------+
+$$\begin{aligned}
+\overline{\rho_{g}} &= k_{0}\left\lbrack 1 + k_{1}^{p}\overline{F_{1}} + k_{2}^{p}\overline{F_{2}} \right\rbrack \\
+\overline{\overline{\rho_{g}}} &= k_{0}\left\lbrack 1 + k_{1}^{p}\overline{\overline{F_{1}}} + k_{2}^{p}\overline{\overline{F_{2}}} \right\rbrack
+\end{aligned}$$ {#eq-eq46}
 
-+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                             |
-+:============================================================================================================================================================+
-| $$\frac{\overline{\rho_{g}}}{\rho_{g}} = \ \frac{1 + k_{1}^{p}{\overline{F}}_{1} + k_{2}^{p}{\overline{F}}_{2}}{1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2}}$$ (38) |
-+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
+$$\frac{\overline{\rho_{g}}}{\rho_{g}} = \frac{1 + k_{1}^{p}{\overline{F}}_{1} + k_{2}^{p}{\overline{F}}_{2}}{1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2}}$$ {#eq-eq47}
 
-------------------------------------------------------------------------
+$$\frac{\overline{\rho_{g}}'}{\rho_{g}} = \frac{1 + k_{1}^{p}{\overline{F}}_{1}' + k_{2}^{p}{\overline{F}}_{2}'}{1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2}}$$ {#eq-eq48}
 
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                |
-+:===============================================================================================================================================================+
-| $$\frac{\overline{\rho_{g}}'}{\rho_{g}} = \ \frac{1 + k_{1}^{p}{\overline{F}}_{1}' + k_{2}^{p}{\overline{F}}_{2}'}{1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2}}$$ (39) |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
-
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                            |
-+:===========================================================================================================================================================================================+
-| $$\frac{\overline{\overline{\rho_{g}}}}{\rho_{g}} = \ \frac{1 + k_{1}^{p}\overline{\overline{F_{1}}} + k_{2}^{p}{\overline{\overline{F}}}_{2}}{1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2}}$$ (40) |
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
-------------------------------------------------------------------------
+$$\frac{\overline{\overline{\rho_{g}}}}{\rho_{g}} = \frac{1 + k_{1}^{p}\overline{\overline{F_{1}}} + k_{2}^{p}{\overline{\overline{F}}}_{2}}{1 + k_{1}^{p}F_{1} + k_{2}^{p}F_{2}}$$ {#eq-eq49}
 
 The estimation of BRDF effects requires the knowledge of $k_{1}^{p}$ and${\ k}_{2}^{p}$, the kernels and their directional averages are analytically computed
 
 SMAC general philosophy is to approximate atmospheric functions with simple and fast regression. We thus analysed the variations of the kernel directional averages as a function of wavelength and aerosol optical thickness. The computation has been made with exact radiative transfer computations for the downward atmospheric radiances and integration using Equations (38). Figure 10 and Figure 11 show some examples of $\overline{{\ F}_{1}},\overline{F_{2}},\overline{\overline{F_{1}}},\overline{\overline{F_{2}}}$ in the NIR for one aerosol model and 2 AOTs as well as the case where the sky radiance is supposed isotropic. In the latter case the kernel directional single (resp. double) integral is simply the hemispherical-directional (resp. bi hemispherical) albedo. Directionality is still pronounced for single integrals, and smooth for double ones. It is mainly dependent on wavelength and not AOT and the directional behaviour is like the kernels themselves. So the idea here is to make a computation of $\overline{{\ F}_{1}},\overline{F_{2}},\overline{\overline{F_{1}}},\overline{\overline{F_{2}}}$ as linear combinations of the kernels F~1~ and F~2~, the coefficients of the combinations being only functions of the spectral channel.
 
-+--------------------------------------------------------------------------------------------------------------------------------------+----------+
-| $${\overline{F}}_{1}\  = d_{1}^{0} + \ d_{1}^{1}\mathbf{F}_{\mathbf{1}}\mathbf{\ } + \ d_{1}^{2}\mathbf{F}_{\mathbf{2}}$$            | \(41\)   |
-|                                                                                                                                      |          |
-| $${\overline{F}}_{2}\  = d_{2}^{0} + \ d_{2}^{1}\mathbf{F}_{\mathbf{1}}\mathbf{\ } + \ d_{2}^{2}\mathbf{F}_{\mathbf{2}}$$            |          |
-|                                                                                                                                      |          |
-| $$\overline{\overline{F_{1}}}\  = b_{1}^{0} + \ b_{1}^{1}\mathbf{F}_{\mathbf{1}}\mathbf{\ } + \ b_{1}^{2}\mathbf{F}_{\mathbf{2}}$$   |          |
-|                                                                                                                                      |          |
-| $${\overline{\overline{F}}}_{2}\  = b_{2}^{0} + \ b_{2}^{1}\mathbf{F}_{\mathbf{1}}\mathbf{\ } + \ b_{2}^{2}\mathbf{F}_{\mathbf{2}}$$ |          |
-|                                                                                                                                      |          |
-| $${\overline{F}}_{1}^{'} = d_{1}^{0} + \ d_{1}^{1}\mathbf{F}_{\mathbf{1}}^{'} + \ d_{1}^{2}\mathbf{F}_{\mathbf{2}}^{'}$$             |          |
-|                                                                                                                                      |          |
-| $${\overline{F}}_{2}^{'} = d_{2}^{0} + \ d_{2}^{1}\mathbf{F}_{\mathbf{1}}^{'} + \ d_{2}^{2}\mathbf{F}_{\mathbf{2}}^{'}$$             |          |
-+======================================================================================================================================+==========+
-|                                                                                                                                      |          |
-+--------------------------------------------------------------------------------------------------------------------------------------+----------+
+$$\begin{aligned}
+{\overline{F}}_{1} &= d_{1}^{0} + d_{1}^{1}\mathbf{F}_{\mathbf{1}} + d_{1}^{2}\mathbf{F}_{\mathbf{2}} \\
+{\overline{F}}_{2} &= d_{2}^{0} + d_{2}^{1}\mathbf{F}_{\mathbf{1}} + d_{2}^{2}\mathbf{F}_{\mathbf{2}} \\
+\overline{\overline{F_{1}}} &= b_{1}^{0} + b_{1}^{1}\mathbf{F}_{\mathbf{1}} + b_{1}^{2}\mathbf{F}_{\mathbf{2}} \\
+{\overline{\overline{F}}}_{2} &= b_{2}^{0} + b_{2}^{1}\mathbf{F}_{\mathbf{1}} + b_{2}^{2}\mathbf{F}_{\mathbf{2}} \\
+{\overline{F}}_{1}^{'} &= d_{1}^{0} + d_{1}^{1}\mathbf{F}_{\mathbf{1}}^{'} + d_{1}^{2}\mathbf{F}_{\mathbf{2}}^{'} \\
+{\overline{F}}_{2}^{'} &= d_{2}^{0} + d_{2}^{1}\mathbf{F}_{\mathbf{1}}^{'} + d_{2}^{2}\mathbf{F}_{\mathbf{2}}^{'}
+\end{aligned}$$ {#eq-eq50}
 
-Where, by convention, we noted:
+Where, by convention:
 
-+-------------------------------------------------------------------------------------+------------+
-| $${\mathbf{F}_{\mathbf{1}} = \ F}_{1}\left( \theta_{s}{,\theta}_{v},\phi \right)$$  | \(42\)     |
-|                                                                                     |            |
-| $${\mathbf{F}_{\mathbf{2}} = \ F}_{2}\left( \theta_{s}{,\theta}_{v},\phi \right)$$  |            |
-|                                                                                     |            |
-| $${\mathbf{F'}_{\mathbf{1}} = \ F}_{1}\left( \theta_{v}{,\theta}_{s},\phi \right)$$ |            |
-|                                                                                     |            |
-| $${\mathbf{F'}_{\mathbf{2}} = \ F}_{2}\left( \theta_{v}{,\theta}_{s},\phi \right)$$ |            |
-+=====================================================================================+============+
-|                                                                                     |            |
-+-------------------------------------------------------------------------------------+------------+
+$$\begin{aligned}
+\mathbf{F}_{1} &= F_{1}\left( \theta_{s}{,\theta}_{v},\phi \right) \\
+\mathbf{F}_{2} &= F_{2}\left( \theta_{s}{,\theta}_{v},\phi \right) \\
+\mathbf{F}_{1}' &= F_{1}\left( \theta_{v}{,\theta}_{s},\phi \right) \\
+\mathbf{F}_{2}' &= F_{2}\left( \theta_{v}{,\theta}_{s},\phi \right)
+\end{aligned}$$ {#eq-eq51}
 
 The 12 regressions coefficients $d_{i}^{k}$ and $b_{i}^{k}$ are stored in the SMAC coefficient's structure. F~1~ and F~2~ are analytical functions, computed once per pixel. Therefore, the corrective BRDF terms are calculated extremely fast.
 
 The accuracy of such modelling has been checked against exact computations and compared to the accuracy of the lambertian assumption. A typical example is given in Figure 12 and Figure 13 for a scene that consists of a vegetation target in the NIR with a high aerosol load, where the BRDF effects are the highest. On can see that the lambertian assumption leads to directional biases that could reach 10% for oblique views and SZA=60°. Our simple model significantly reduces the intensity and directional dependence of those biases.
 
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ![](./media/media/image17.png){width="5.822834645669292in" height="2.4960629921259843in"} |
-+:============================================================================================================================================================================================+
-| ![](./media/media/image18.png){width="5.822834645669292in" height="2.4960629921259843in"} |
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ![](./media/media/image19.png){width="5.822834645669292in" height="2.4960629921259843in"} |
-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
++----------------------------------------------------------------------------------------------+
+| ![](./media/media/image17.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
++:=============================================================================================+
+| ![](./media/media/image18.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
++----------------------------------------------------------------------------------------------+
+| ![](./media/media/image19.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
++----------------------------------------------------------------------------------------------+
 
 Figure : Polar plots of F1: geometric kernel (left), single and double directional averages ${\overline{F}}_{1}$ (centre) and $\overline{\overline{F_{1}}}$ (right) as a function of view zenith angle (VZA) and relative azimuth angles (RAA) and for a SZA of 60° and λ=865 nm. Transects correspond to RAA=0 (black), 60 (red) and 90° (green). (TOP) AOT=0.01, (MIDDLE) AOT=0.4, (BOTTOM) the sky downward radiance is assumed isotropic.
 
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ![](./media/media/image20.png){width="5.822834645669292in" height="2.4960629921259843in"} |
-+:=============================================================================================================================================================================================+
-| ![](./media/media/image21.png){width="5.822834645669292in" height="2.4960629921259843in"}  |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ![](./media/media/image22.png){width="5.822834645669292in" height="2.4960629921259843in"}  |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
++----------------------------------------------------------------------------------------------+
+| ![](./media/media/image20.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
++:=============================================================================================+
+| ![](./media/media/image21.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
++----------------------------------------------------------------------------------------------+
+| ![](./media/media/image22.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
++----------------------------------------------------------------------------------------------+
 
 Figure : Same as Figure 10 but for the volumetric kernel${\ F}_{2}$.
 
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ![](./media/media/image23.png){width="6.792361111111111in" height="2.263888888888889in"} |
-+:===========================================================================================================================================================================================+
-| ![](./media/media/image24.png){width="6.792361111111111in" height="2.263888888888889in"} |
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
++---------------------------------------------------------------------------------------------+
+| ![](./media/media/image23.png){width="6.792361111111111in" height="2.263888888888889in"} \| |
++:============================================================================================+
+| ![](./media/media/image24.png){width="6.792361111111111in" height="2.263888888888889in"} \| |
++---------------------------------------------------------------------------------------------+
 
 Figure 12 : Polar plots of the TOA reflectance for the Proba-V NIR band and for a typical vegetation target modelled as \[k~0~=0.36, k~1~=0.03, k~2~ =0.24\] and for SZA = 30° and AOT=0.4. The transects correspond to RAA=0° (black), and 90° (red) (Left) Exact computation, (centre) Approximation and (right) relative difference in % between approximation and exact computations. (TOP) 6S formulation where the surface is considered lambertian, (BOTTOM) 6S formulation with a modelled surface BRDF as described in this section.
 
-| ![](./media/media/image25.png){width="6.792361111111111in" height="2.263888888888889in"} |
-|:---|
++------------------------------------------------------------------------------------------+
+|                                                                                          |
++:=========================================================================================+
 | ![](./media/media/image26.png){width="6.792361111111111in" height="2.263888888888889in"} |
++------------------------------------------------------------------------------------------+
 
 Figure : same as Figure 12 but for SZA=60°.
 
@@ -1648,17 +1503,23 @@ $g(\lambda) = \frac{1}{2}\int_{- 1}^{1}{\mu P(\mu,\lambda)}d\mu$ with $\mu = cos
 
 These aerosol optical properties are plotted in Figure 15 and Figure 16.
 
-| ![](./media/media/image29.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
-|:---|
++--------------------------------------------------------------------------------------------+
+|                                                                                            |
++:===========================================================================================+
 | ![](./media/media/image30.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
++--------------------------------------------------------------------------------------------+
 | ![](./media/media/image31.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
++--------------------------------------------------------------------------------------------+
 
 Figure : OPAC Aerosols components optical properties with RH=80% at the Proba-V spectral bands
 
-| ![](./media/media/image32.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
-|:---|
++--------------------------------------------------------------------------------------------+
+|                                                                                            |
++:===========================================================================================+
 | ![](./media/media/image33.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
++--------------------------------------------------------------------------------------------+
 | ![](./media/media/image34.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
++--------------------------------------------------------------------------------------------+
 
 Figure : 148 Aerosols mixtures optical properties at the Proba-V spectral bands.
 
@@ -1690,7 +1551,7 @@ The cloud contaminated are masked and not further processed. The selection is ba
 
 ## Spatial and temporal interpolation of auxiliary data
 
-From elev, Delev, lat, lon, the pixel altitude **z** and its uncertainty **∆z** is obtained through a [nearest neighbor interpolation]{.underline}.
+From elev, lat, lon, the pixel altitude **z** is obtained through a [spatial linear interpolation]{.underline}. The associated altitude uncertainty **∆z** is then derived from local maximum terrain slope and a 0.5-pixel geolocation uncertainty.
 
 The sea-level pressure **P~0~**, the temperature above ground **T**, the total ozone column$\ \mathbf{U}_{\mathbf{O}_{\mathbf{3}}}$, the total column water vapor$\ \mathbf{U}_{\mathbf{H}_{\mathbf{2}}\mathbf{O}}$ and the AOT at 550 nm $\mathbf{\tau}_{\mathbf{a}}^{\mathbf{550}}$ , $\mathbf{\tau}_{\mathbf{a;DU}}^{\mathbf{550}}\mathbf{,\ }\mathbf{\tau}_{\mathbf{a;SU}}^{\mathbf{550}}\mathbf{,}\mathbf{\tau}_{\mathbf{a;OC}}^{\mathbf{550}}\mathbf{,}\mathbf{\tau}_{\mathbf{a;BC}}^{\mathbf{550}}\mathbf{,}\mathbf{\tau}_{\mathbf{a;SS}}^{\mathbf{550}}$are obtained respectively from the SLP, T10M, TO3, TQV and TOTEXTTAU, DUEXTTAU, SUEXTTAU, OCEXTTAU, BCEXTTAU, SSEXTTAU MERRA-2 auxiliary data (see section2.3) through a [spatial and temporal linear interpolation]{.underline}
 
@@ -1818,7 +1679,7 @@ coeffs, SZA, VZA, SAA, VAA,$\mathbf{U}_{\mathbf{H}_{\mathbf{2}}\mathbf{O}}$,$\ma
 
 The run method is called twice, one for the VIS-NIR bands and one for the SWIR band. iaero_list contains 11 aerosol model number. The first one is iaero, the 10 others are iaero_AMIPj ( see section 10.4).
 
-Upon selection in the configuration, the k1p and k2p arrays are set to zero, that means that the surface is considered lambertian. A call with these coefficients not set to zero, for example using L3 BRDF products allows to estimate the effect of BRDF on the TOC-r
+The BRDF uncertainty term has an explicit configuration switch (`enable_brdf_uncertainty`). If disabled, `uncertainty_from_RTM_BRDF_*` is set to exactly 0 for all bands/pixels. If enabled, the term is estimated from the difference between BRDF-aware and Lambertian runs.
 
 All the image inputs are multidimensional
 
@@ -1874,91 +1735,175 @@ An example of the outputs is given in.
 
 ## Output file structure
 
-| **Variable** | **Dimensions** | **Shape** | **Dtype** | **Units** | **Long Name** |
-|:---|:---|:---|:---|:---|:---|
-| AOD_550_used | ('height', 'width') | (4275, 2601) | float32 | 1 | Aerosol Optical Depth at 550nm |
-| Jacobian_Rtoc_vs_AOD_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| Jacobian_Rtoc_vs_AOD_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| Jacobian_Rtoc_vs_AOD_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| Jacobian_Rtoc_vs_AOD_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| Jacobian_Rtoc_vs_Ps_B1 | ('height', 'width') | (4275, 2601) | float32 | hPa-1 | Jacobian of TOC reflectance with respect to pressure |
-| Jacobian_Rtoc_vs_Ps_B2 | ('height', 'width') | (4275, 2601) | float32 | hPa-1 | Jacobian of TOC reflectance with respect to pressure |
-| Jacobian_Rtoc_vs_Ps_B3 | ('height', 'width') | (4275, 2601) | float32 | hPa-1 | Jacobian of TOC reflectance with respect to pressure |
-| Jacobian_Rtoc_vs_Ps_B4 | ('height', 'width') | (4275, 2601) | float32 | hPa-1 | Jacobian of TOC reflectance with respect to pressure |
-| Jacobian_Rtoc_vs_Rtoa_B1 | ('height', 'width') | (4275, 2601) | float32 | 1 | Jacobian of TOC reflectance with respect to TOA reflectance |
-| Jacobian_Rtoc_vs_Rtoa_B2 | ('height', 'width') | (4275, 2601) | float32 | 1 | Jacobian of TOC reflectance with respect to TOA reflectance |
-| Jacobian_Rtoc_vs_Rtoa_B3 | ('height', 'width') | (4275, 2601) | float32 | 1 | Jacobian of TOC reflectance with respect to TOA reflectance |
-| Jacobian_Rtoc_vs_Rtoa_B4 | ('height', 'width') | (4275, 2601) | float32 | 1 | Jacobian of TOC reflectance with respect to TOA reflectance |
-| Jacobian_Rtoc_vs_UH2O_B1 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to water vapor |
-| Jacobian_Rtoc_vs_UH2O_B2 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to water vapor |
-| Jacobian_Rtoc_vs_UH2O_B3 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to water vapor |
-| Jacobian_Rtoc_vs_UH2O_B4 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to water vapor |
-| Jacobian_Rtoc_vs_UO3_B1 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to ozone |
-| Jacobian_Rtoc_vs_UO3_B2 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to ozone |
-| Jacobian_Rtoc_vs_UO3_B3 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to ozone |
-| Jacobian_Rtoc_vs_UO3_B4 | ('height', 'width') | (4275, 2601) | float32 | cm2 g-1 | Jacobian of TOC reflectance with respect to ozone |
-| Quality_flag | ('height', 'width') | (4275, 2601) | int16 | N/A | N/A |
-| Rtoc_B1 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Bidirectional Reflectance Factor |
-| Rtoc_B2 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Bidirectional Reflectance Factor |
-| Rtoc_B3 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Bidirectional Reflectance Factor |
-| Rtoc_B4 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Bidirectional Reflectance Factor |
-| Rtoc_uncertainty_B1 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Reflectance Uncertainty |
-| Rtoc_uncertainty_B2 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Reflectance Uncertainty |
-| Rtoc_uncertainty_B3 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Reflectance Uncertainty |
-| Rtoc_uncertainty_B4 | ('height', 'width') | (4275, 2601) | float32 | 1 | Top of Canopy Reflectance Uncertainty |
-| SAA | ('height', 'width') | (4275, 2601) | float32 | degree | Solar Azimuth Angle |
-| SM_MAP_B1 | ('height', 'width') | (4275, 2601) | uint8 | 1 | Status Map |
-| SM_MAP_B2 | ('height', 'width') | (4275, 2601) | uint8 | 1 | Status Map |
-| SM_MAP_B3 | ('height', 'width') | (4275, 2601) | uint8 | 1 | Status Map |
-| SM_MAP_B4 | ('height', 'width') | (4275, 2601) | uint8 | 1 | Status Map |
-| SZA | ('height', 'width') | (4275, 2601) | float32 | degree | Solar Zenith Angle |
-| VAA | ('height', 'width') | (4275, 2601) | float32 | degree | Sensor Azimuth Angle (VNIR) |
-| VAA_IR | ('height', 'width') | (4275, 2601) | float32 | degree | Sensor Azimuth Angle (SWIR) |
-| VZA | ('height', 'width') | (4275, 2601) | float32 | degree | Sensor Zenith Angle (VNIR) |
-| VZA_IR | ('height', 'width') | (4275, 2601) | float32 | degree | Sensor Zenith Angle (SWIR) |
-| aerosol_model_index | ('height', 'width') | (4275, 2601) | int32 | N/A | N/A |
-| clm | ('height', 'width') | (4275, 2601) | uint8 | 1 | Cloud Mask |
-| lat | ('height', 'width') | (4275, 2601) | float32 | degrees_north | Latitude |
-| lon | ('height', 'width') | (4275, 2601) | float32 | degrees_east | Longitude |
-| ozone_column_used | ('height', 'width') | (4275, 2601) | float32 | DU | Total Column Ozone |
-| surface_pressure_used | ('height', 'width') | (4275, 2601) | float32 | Pa | Sea Level Pressure |
-| uncertainty_from_RTM_BRDF_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_BRDF_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_BRDF_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_BRDF_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_fit_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_fit_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_fit_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_fit_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_terrain_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_terrain_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_terrain_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_RTM_terrain_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_TOA_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_TOA_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_TOA_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_TOA_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aerosol_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aerosol_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aerosol_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aerosol_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aod_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aod_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aod_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_aod_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_h2o_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_h2o_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_h2o_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_h2o_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_ozone_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_ozone_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_ozone_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_ozone_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_pressure_B1 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_pressure_B2 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_pressure_B3 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| uncertainty_from_pressure_B4 | ('height', 'width') | (4275, 2601) | float32 | N/A | N/A |
-| water_vapor_column_used | ('height', 'width') | (4275, 2601) | float32 | kg m-2 | Total Precipitable Water Vapor |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| **Variable**                    | **Dimensions**      | **Shape**    | **Dtype** | **Units**     | **Long Name**                                               |
++:================================+:====================+:=============+:==========+:==============+:============================================================+
+| AOD_550_used                    | ('height', 'width') | (4275, 2601) | float32   | 1             | Aerosol Optical Depth at 550nm                              |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_AOD_B1         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_AOD_B2         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_AOD_B3         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_AOD_B4         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Ps_B1          | ('height', 'width') | (4275, 2601) | float32   | hPa-1         | Jacobian of TOC reflectance with respect to pressure        |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Ps_B2          | ('height', 'width') | (4275, 2601) | float32   | hPa-1         | Jacobian of TOC reflectance with respect to pressure        |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Ps_B3          | ('height', 'width') | (4275, 2601) | float32   | hPa-1         | Jacobian of TOC reflectance with respect to pressure        |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Ps_B4          | ('height', 'width') | (4275, 2601) | float32   | hPa-1         | Jacobian of TOC reflectance with respect to pressure        |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Rtoa_B1        | ('height', 'width') | (4275, 2601) | float32   | 1             | Jacobian of TOC reflectance with respect to TOA reflectance |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Rtoa_B2        | ('height', 'width') | (4275, 2601) | float32   | 1             | Jacobian of TOC reflectance with respect to TOA reflectance |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Rtoa_B3        | ('height', 'width') | (4275, 2601) | float32   | 1             | Jacobian of TOC reflectance with respect to TOA reflectance |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_Rtoa_B4        | ('height', 'width') | (4275, 2601) | float32   | 1             | Jacobian of TOC reflectance with respect to TOA reflectance |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UH2O_B1        | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to water vapor     |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UH2O_B2        | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to water vapor     |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UH2O_B3        | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to water vapor     |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UH2O_B4        | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to water vapor     |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UO3_B1         | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to ozone           |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UO3_B2         | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to ozone           |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UO3_B3         | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to ozone           |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Jacobian_Rtoc_vs_UO3_B4         | ('height', 'width') | (4275, 2601) | float32   | cm2 g-1       | Jacobian of TOC reflectance with respect to ozone           |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Quality_flag                    | ('height', 'width') | (4275, 2601) | int16     | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_B1                         | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Bidirectional Reflectance Factor              |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_B2                         | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Bidirectional Reflectance Factor              |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_B3                         | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Bidirectional Reflectance Factor              |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_B4                         | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Bidirectional Reflectance Factor              |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_uncertainty_B1             | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Reflectance Uncertainty                       |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_uncertainty_B2             | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Reflectance Uncertainty                       |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_uncertainty_B3             | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Reflectance Uncertainty                       |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| Rtoc_uncertainty_B4             | ('height', 'width') | (4275, 2601) | float32   | 1             | Top of Canopy Reflectance Uncertainty                       |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| SAA                             | ('height', 'width') | (4275, 2601) | float32   | degree        | Solar Azimuth Angle                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| SM_MAP_B1                       | ('height', 'width') | (4275, 2601) | uint8     | 1             | Status Map                                                  |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| SM_MAP_B2                       | ('height', 'width') | (4275, 2601) | uint8     | 1             | Status Map                                                  |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| SM_MAP_B3                       | ('height', 'width') | (4275, 2601) | uint8     | 1             | Status Map                                                  |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| SM_MAP_B4                       | ('height', 'width') | (4275, 2601) | uint8     | 1             | Status Map                                                  |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| SZA                             | ('height', 'width') | (4275, 2601) | float32   | degree        | Solar Zenith Angle                                          |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| VAA                             | ('height', 'width') | (4275, 2601) | float32   | degree        | Sensor Azimuth Angle (VNIR)                                 |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| VAA_IR                          | ('height', 'width') | (4275, 2601) | float32   | degree        | Sensor Azimuth Angle (SWIR)                                 |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| VZA                             | ('height', 'width') | (4275, 2601) | float32   | degree        | Sensor Zenith Angle (VNIR)                                  |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| VZA_IR                          | ('height', 'width') | (4275, 2601) | float32   | degree        | Sensor Zenith Angle (SWIR)                                  |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| aerosol_model_index             | ('height', 'width') | (4275, 2601) | int32     | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| clm                             | ('height', 'width') | (4275, 2601) | uint8     | 1             | Cloud Mask                                                  |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| lat                             | ('height', 'width') | (4275, 2601) | float32   | degrees_north | Latitude                                                    |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| lon                             | ('height', 'width') | (4275, 2601) | float32   | degrees_east  | Longitude                                                   |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| ozone_column_used               | ('height', 'width') | (4275, 2601) | float32   | DU            | Total Column Ozone                                          |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| surface_pressure_used           | ('height', 'width') | (4275, 2601) | float32   | Pa            | Sea Level Pressure                                          |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_BRDF_B1    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_BRDF_B2    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_BRDF_B3    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_BRDF_B4    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_fit_B1     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_fit_B2     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_fit_B3     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_fit_B4     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_terrain_B1 | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_terrain_B2 | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_terrain_B3 | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_RTM_terrain_B4 | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_TOA_B1         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_TOA_B2         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_TOA_B3         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_TOA_B4         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aerosol_B1     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aerosol_B2     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aerosol_B3     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aerosol_B4     | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aod_B1         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aod_B2         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aod_B3         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_aod_B4         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_h2o_B1         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_h2o_B2         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_h2o_B3         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_h2o_B4         | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_ozone_B1       | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_ozone_B2       | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_ozone_B3       | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_ozone_B4       | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_pressure_B1    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_pressure_B2    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_pressure_B3    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| uncertainty_from_pressure_B4    | ('height', 'width') | (4275, 2601) | float32   | N/A           | N/A                                                         |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
+| water_vapor_column_used         | ('height', 'width') | (4275, 2601) | float32   | kg m-2        | Total Precipitable Water Vapor                              |
++---------------------------------+---------------------+--------------+-----------+---------------+-------------------------------------------------------------+
 
 Standard outputs variables (TOC-reflectances and total associated uncertainties). Optional outputs variables (Jacobians and uncertainty contributors). Debug output variables (MERRA-2 inputs and aerosol model index)
 
@@ -1982,38 +1927,204 @@ Standard outputs variables (TOC-reflectances and total associated uncertainties)
 - Processing date/time
 - Geographic coverage
 
-![](./media/media/image36.png){width="6.3in" height="3.0898490813648296in"}
-
-Figure : Example of inputs ancillary atmospheric data for a VGT sub-image
-
-![](./media/media/image37.png){width="6.297829177602799in" height="9.484722222222222in"}
-
-Figure : Example of outputs (Jacobians and TOC reflectances)
-
-![](./media/media/image38.png){width="4.8125in" height="10.08380905511811in"}
-
-Figure Outputs uncertainties
-
-![](./media/media/image39.png){width="6.3in" height="2.2256944444444446in"}
-
-Figure Outputs flags and AOD\@550 used
-
 # Appendix D: Implementation Notes (NEW in v1.1)
 
 This appendix documents implementation-specific details, performance optimizations, and known limitations of the FDR4VGT production codebase (`fdr4vgt_opencl` repository). These are not changes to the scientific algorithm described in Sections 1-10, but engineering decisions for operational efficiency, plus the status of two items flagged in Section 5.5 (Known Limitations).
 
-## D.1 Performance Optimizations
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+
+import configparser
+
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
+import numpy as np
+import xarray as xr
+
+THUMB_SIZE = 50
+BANDS = ["B1", "B2", "B3", "B4"]
+
+
+def read_output_path(config_file="../fdr4vgt/probav_config.cfg"):
+  cf = configparser.ConfigParser()
+  cf.read(config_file)
+  return cf["Paths"]["output"]
+
+
+def open_output(nc_path):
+  return xr.open_dataset(nc_path, chunks={"height": 1024, "width": 1024})
+
+
+def crop_thumbnail(ds, center, size=THUMB_SIZE):
+  row, col = center
+  half = size // 2
+  return ds.isel(height=slice(row - half, row - half + size), width=slice(col - half, col - half + size)).compute()
+
+
+def cloud_mask(ds):
+  return ds["clm"].compute() > 1e6
+
+
+def imshow_panel(ax, data, title, cmap="viridis", mask=None, vmin=None, vmax=None, cbar_label="", cbar_fmt="%.2g", **kwargs):
+  arr = np.asarray(data).astype(float)
+  if mask is not None:
+    arr = np.where(np.asarray(mask), np.nan, arr)
+  im = ax.imshow(arr, cmap=cmap, vmin=vmin, vmax=vmax, **kwargs)
+  ax.set_title(title, fontsize=9)
+  ax.axis("off")
+  cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+  cbar.ax.yaxis.set_major_formatter(FormatStrFormatter(cbar_fmt))
+  if cbar_label:
+    cbar.set_label(cbar_label, fontsize=8)
+
+
+def shared_limits(arrays, mask=None):
+  vals = []
+  for arr in arrays:
+    a = np.asarray(arr).astype(float)
+    if mask is not None:
+      a = a[~np.asarray(mask)]
+    a = a[np.isfinite(a)]
+    vals.extend(a.tolist())
+  if not vals:
+    return 0, 1
+  return float(np.min(vals)), float(np.max(vals))
+
+
+nc_path = read_output_path()
+print("Output NetCDF:", nc_path)
+ds_full = open_output(nc_path)
+center = (3029, 646)
+print(f"Thumbnail centered at (row={center[0]}, col={center[1]}), size={THUMB_SIZE}x{THUMB_SIZE}")
+thumb = crop_thumbnail(ds_full, center, size=THUMB_SIZE)
+mask = cloud_mask(thumb)
+
+fig, axes = plt.subplots(1, 4, figsize=(16, 4.8), constrained_layout=True)
+imshow_panel(axes[0], thumb["surface_pressure_used"], "Surface pressure", cmap="jet", cbar_label="hPa")
+imshow_panel(axes[1], thumb["ozone_column_used"], "Ozone column", cmap="jet", cbar_label="cm·atm")
+imshow_panel(axes[2], thumb["water_vapor_column_used"], "Specific humidity", cmap="jet", cbar_label="g/kg")
+imshow_panel(axes[3], thumb["AOD_550_used"], "AOD @ 550 nm", cmap="jet", cbar_label="AOD")
+fig.suptitle(f"Ancillary atmospheric inputs ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=12)
+fig.savefig("figure36_ancillary_inputs.png", dpi=180, bbox_inches="tight")
+plt.show()
+
+jacobians = {
+  "Rtoa": "Jacobian_Rtoc_vs_Rtoa_",
+  "UO3": "Jacobian_Rtoc_vs_UO3_",
+  "UH2O": "Jacobian_Rtoc_vs_UH2O_",
+  "Ps": "Jacobian_Rtoc_vs_Ps_",
+  "AOD": "Jacobian_Rtoc_vs_AOD_",
+}
+
+jac_limits = {}
+for name, prefix in jacobians.items():
+  jac_limits[name] = shared_limits([thumb[f"{prefix}{band}"] for band in BANDS], mask)
+
+panels = []
+for band in BANDS:
+  panels.append((thumb[f"Rtoc_{band}"], f"Rtoc {band}", "Greys_r", 0.0, 0.4, "", "%.2f"))
+  for name, prefix in jacobians.items():
+    jvmin, jvmax = jac_limits[name]
+    panels.append((thumb[f"{prefix}{band}"], f"J({name}) {band}", "jet", jvmin, jvmax, "", "%.2e"))
+
+nrows = -(-len(panels) // 4)
+fig, axes = plt.subplots(nrows, 4, figsize=(18, 3.8 * nrows), constrained_layout=True)
+axes = axes.flatten()
+for i, (data, title, cmap, vmin, vmax, cbar_label, cbar_fmt) in enumerate(panels):
+  imshow_panel(axes[i], data, title, cmap=cmap, mask=mask, vmin=vmin, vmax=vmax, cbar_label=cbar_label, cbar_fmt=cbar_fmt)
+for i in range(len(panels), len(axes)):
+  axes[i].axis("off")
+fig.suptitle(f"TOC reflectances and Jacobians ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=14)
+fig.savefig("figure37_rtoc_jacobians.png", dpi=180, bbox_inches="tight")
+plt.show()
+
+unc_components = {
+  "Total": ("Rtoc_uncertainty_", "reflectance"),
+  "TOA": ("uncertainty_from_TOA_", "reflectance"),
+  "O3": ("uncertainty_from_ozone_", "reflectance"),
+  "H2O": ("uncertainty_from_h2o_", "reflectance"),
+  "Ps": ("uncertainty_from_pressure_", "reflectance"),
+  "AOD": ("uncertainty_from_aod_", "reflectance"),
+  "Aerosol model": ("uncertainty_from_aerosol_", "reflectance"),
+  "BRDF": ("uncertainty_from_RTM_BRDF_", "reflectance"),
+  "RTM fit": ("uncertainty_from_RTM_fit_", "reflectance"),
+  "Terrain": ("uncertainty_from_RTM_terrain_", "reflectance"),
+}
+
+unc_limits = {}
+for name, (prefix, _) in unc_components.items():
+  arrs = [thumb[f"{prefix}{band}"] for band in BANDS if f"{prefix}{band}" in thumb]
+  if arrs:
+    vmin, vmax = shared_limits(arrs, mask)
+    unc_limits[name] = (max(0.0, vmin), vmax)
+  else:
+    unc_limits[name] = (0, 1)
+
+panels = []
+for band in BANDS:
+  for name, (prefix, _) in unc_components.items():
+    var = f"{prefix}{band}"
+    if var in thumb:
+      panels.append((thumb[var], f"{name} {band}", "jet", unc_limits[name][0], unc_limits[name][1], "reflectance", "%.2e"))
+    else:
+      panels.append(None)
+
+nrows = -(-len(panels) // 4)
+fig, axes = plt.subplots(nrows, 4, figsize=(18, 3.8 * nrows), constrained_layout=True)
+axes = axes.flatten()
+for i, panel in enumerate(panels):
+  if panel is not None:
+    data, title, cmap, vmin, vmax, cbar_label, cbar_fmt = panel
+    imshow_panel(axes[i], data, title, cmap=cmap, mask=mask, vmin=vmin, vmax=vmax, cbar_label=cbar_label, cbar_fmt=cbar_fmt)
+  else:
+    axes[i].axis("off")
+for i in range(len(panels), len(axes)):
+  axes[i].axis("off")
+fig.suptitle(f"Uncertainty components ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=14)
+fig.savefig("figure38_uncertainties.png", dpi=180, bbox_inches="tight")
+plt.show()
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 4.8), constrained_layout=True)
+# Quality flag: discrete colormap over full 7-bit range (0–127)
+qf_data = np.asarray(thumb["Quality_flag"]).astype(int)
+qf_mask = np.asarray(mask)
+qf_display = np.where(qf_mask, np.nan, qf_data)
+cmap_qf = plt.colormaps["tab20"].resampled(128)
+im_qf = axes[0].imshow(qf_display, cmap=cmap_qf, vmin=0, vmax=127, interpolation="nearest")
+axes[0].set_title("Quality flag (bitfield, 0–127)", fontsize=9)
+axes[0].axis("off")
+cbar_qf = plt.colorbar(im_qf, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 128, 16))
+cbar_qf.ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+cbar_qf.set_label("flag value", fontsize=8)
+imshow_panel(axes[1], thumb["AOD_550_used"], "AOD @ 550 nm used", cmap="jet", cbar_label="AOD")
+fig.suptitle(f"Quality flags and AOD@550 used ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=12)
+fig.savefig("figure39_flags_aod.png", dpi=180, bbox_inches="tight")
+plt.show()
+```
+
+The figures above replace the static screenshots in the previous ATBD version.
+
+## Performance Optimizations
 
 ### Ancillary Zarr Cache
 
-| Aspect | Description |
-|----|----|
-| What | Pre-interpolates MERRA-2 fields to the full satellite grid once, stores them in a local Zarr cache |
-| Why | MERRA-2 source files sit on network storage; per-tile interpolation would re-read the network and repeat work |
-| Function | `precompute_ancillary()` in `process.py` |
-| Toggle | `[Sizes] anc_cache` (default on) |
-| Numerical equivalence | Pointwise interpolation → identical to per-tile interpolation (tiles read from local cache with halo) |
-| Memory | Streamed tile-by-tile to bound peak memory (\~2.8 GB, safe on 4 GB nodes) |
++-----------------------+---------------------------------------------------------------------------------------------------------------+
+| Aspect                | Description                                                                                                   |
++=======================+===============================================================================================================+
+| What                  | Pre-interpolates MERRA-2 fields to the full satellite grid once, stores them in a local Zarr cache            |
++-----------------------+---------------------------------------------------------------------------------------------------------------+
+| Why                   | MERRA-2 source files sit on network storage; per-tile interpolation would re-read the network and repeat work |
++-----------------------+---------------------------------------------------------------------------------------------------------------+
+| Function              | `precompute_ancillary()` in `process.py`                                                                      |
++-----------------------+---------------------------------------------------------------------------------------------------------------+
+| Toggle                | `[Sizes] anc_cache` (default on)                                                                              |
++-----------------------+---------------------------------------------------------------------------------------------------------------+
+| Numerical equivalence | Pointwise interpolation → identical to per-tile interpolation (tiles read from local cache with halo)         |
++-----------------------+---------------------------------------------------------------------------------------------------------------+
+| Memory                | Streamed tile-by-tile to bound peak memory (\~2.8 GB, safe on 4 GB nodes)                                     |
++-----------------------+---------------------------------------------------------------------------------------------------------------+
 
 : Ancillary Zarr cache optimization
 
@@ -2021,81 +2132,101 @@ Cache format: Zarr format 2. Most fields are stored as float16 (small values, su
 
 ### Tile-Based Processing
 
-| Aspect | Description |
-|----|----|
-| What | Processes the image in overlapping tiles (`batch_size` × `batch_size` with a halo) |
-| Why | Bounded memory per tile, parallel processing across workers |
-| Function | `process_batched()` generates the tile grid; `_worker_compute_tile()` processes each tile |
-| Config | `[Sizes] chunks_size` (default 512), `[Sizes] nworkers` (default 1) |
-| Halo | ±1 pixel halo for terrain slope/aspect computation (edge effects) |
++------------------+-------------------------------------------------------------------------------------------+
+| Aspect           | Description                                                                               |
++==================+===========================================================================================+
+| What             | Processes the image in overlapping tiles (`batch_size` × `batch_size` with a halo)        |
++------------------+-------------------------------------------------------------------------------------------+
+| Why              | Bounded memory per tile, parallel processing across workers                               |
++------------------+-------------------------------------------------------------------------------------------+
+| Function         | `process_batched()` generates the tile grid; `_worker_compute_tile()` processes each tile |
++------------------+-------------------------------------------------------------------------------------------+
+| Config           | `[Sizes] chunks_size` (default 512), `[Sizes] nworkers` (default 1)                       |
++------------------+-------------------------------------------------------------------------------------------+
+| Halo             | ±1 pixel halo for terrain slope/aspect computation (edge effects)                         |
++------------------+-------------------------------------------------------------------------------------------+
 
 : Tile-based processing optimization
 
 ### Local Output File
 
-| Aspect | Description |
-|----|----|
-| What | Writes the output NetCDF to a local temporary file, then moves it to the final destination once at the end |
-| Why | Serial per-tile append writes degrade badly on network storage (Ceph): \~2 s → \~5 s per tile |
-| Function | `process_batched()` creates a temp file, `shutil.move()` at the end |
-| Toggle | `[Sizes] local_output` (default on) |
++----------------+------------------------------------------------------------------------------------------------------------+
+| Aspect         | Description                                                                                                |
++================+============================================================================================================+
+| What           | Writes the output NetCDF to a local temporary file, then moves it to the final destination once at the end |
++----------------+------------------------------------------------------------------------------------------------------------+
+| Why            | Serial per-tile append writes degrade badly on network storage (Ceph): \~2 s → \~5 s per tile              |
++----------------+------------------------------------------------------------------------------------------------------------+
+| Function       | `process_batched()` creates a temp file, `shutil.move()` at the end                                        |
++----------------+------------------------------------------------------------------------------------------------------------+
+| Toggle         | `[Sizes] local_output` (default on)                                                                        |
++----------------+------------------------------------------------------------------------------------------------------------+
 
 : Local output file optimization
 
 ### Single NetCDF Handle
 
-+----------------------------------+---------------------------------------------------------------------------+
-| Aspect                           | Description                                                               |
-+==================================+===========================================================================+
-| What                             | Opens the output NetCDF handle once and reuses it for all tiles           |
-+----------------------------------+---------------------------------------------------------------------------+
-| Why                              | Per-tile open/close/flush was the dominant writer cost (HDF5 overhead)    |
-+----------------------------------+---------------------------------------------------------------------------+
-| Function                         | `nc_out = Dataset(output_path, 'a')` reused across tiles                  |
-+----------------------------------+---------------------------------------------------------------------------+
-| Flush                            | Periodic close+reopen every `flush_interval` tiles to free the HDF5 cache |
-+----------------------------------+---------------------------------------------------------------------------+
++---------------------+---------------------------------------------------------------------------+
+| Aspect              | Description                                                               |
++=====================+===========================================================================+
+| What                | Opens the output NetCDF handle once and reuses it for all tiles           |
++---------------------+---------------------------------------------------------------------------+
+| Why                 | Per-tile open/close/flush was the dominant writer cost (HDF5 overhead)    |
++---------------------+---------------------------------------------------------------------------+
+| Function            | `nc_out = Dataset(output_path, 'a')` reused across tiles                  |
++---------------------+---------------------------------------------------------------------------+
+| Flush               | Periodic close+reopen every `flush_interval` tiles to free the HDF5 cache |
++---------------------+---------------------------------------------------------------------------+
 
 : Single NetCDF handle optimization
 
 ### DEM Cropping
 
-| Aspect | Description |
-|----|----|
-| What | Crops the global GTOPO30 DEM to the product's lat/lon extent before loading |
-| Why | Full DEM is \~1.9 GB; cropped is \~0.2 GB for a typical narrow longitude range |
-| Function | `xrcrop(dem_ds, lat=data['y'], lon=data['x'])` |
++--------------------+--------------------------------------------------------------------------------+
+| Aspect             | Description                                                                    |
++====================+================================================================================+
+| What               | Crops the global GTOPO30 DEM to the product's lat/lon extent before loading    |
++--------------------+--------------------------------------------------------------------------------+
+| Why                | Full DEM is \~1.9 GB; cropped is \~0.2 GB for a typical narrow longitude range |
++--------------------+--------------------------------------------------------------------------------+
+| Function           | `xrcrop(dem_ds, lat=data['y'], lon=data['x'])`                                 |
++--------------------+--------------------------------------------------------------------------------+
 
 : DEM cropping optimization
 
 ### Copy-on-Write Shared State
 
-| Aspect | Description |
-|----|----|
-| What | Pre-forks the worker pool, then populates a `_SHARED` dict (inherited via copy-on-write) |
-| Why | Avoids re-pickling large objects (SMAC coefficients, DEM, MERRA-2 cache) for every task |
-| Function | `_SHARED.update()` executed before the pool is created |
-| Objects | SMAC coefficients (\~100 MB), aerosol model LUT, terrain data |
++------------------+------------------------------------------------------------------------------------------+
+| Aspect           | Description                                                                              |
++==================+==========================================================================================+
+| What             | Pre-forks the worker pool, then populates a `_SHARED` dict (inherited via copy-on-write) |
++------------------+------------------------------------------------------------------------------------------+
+| Why              | Avoids re-pickling large objects (SMAC coefficients, DEM, MERRA-2 cache) for every task  |
++------------------+------------------------------------------------------------------------------------------+
+| Function         | `_SHARED.update()` executed before the pool is created                                   |
++------------------+------------------------------------------------------------------------------------------+
+| Objects          | SMAC coefficients (\~100 MB), aerosol model LUT, terrain data                            |
++------------------+------------------------------------------------------------------------------------------+
 
 : Copy-on-write shared state optimization
 
-## D.2 Data Type Requirements
+## Data Type Requirements
 
 ### Float32 for SLP/T10M (Overflow Fix)
 
-+----------------------------------+-----------------------------------------------------------------------------------------------+
-| Aspect                           | Description                                                                                   |
-+==================================+===============================================================================================+
-| Issue                            | The ancillary Zarr cache stored `T10M` and `SLP` as float16                                   |
-+----------------------------------+-----------------------------------------------------------------------------------------------+
-| Root cause                       | `smaccl.c3s_lib.Ps()` computes `log(R·T)` where $R\cdot T = 287.058 \times 290 \approx 83246$ |
-+----------------------------------+-----------------------------------------------------------------------------------------------+
-| Overflow                         | 83246 exceeds the float16 max (65504) → NaN in the pressure correction → NaN `Rtoc`           |
-+----------------------------------+-----------------------------------------------------------------------------------------------+
-| Fix                              | `_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}` keeps these two fields as float32               |
-+----------------------------------+-----------------------------------------------------------------------------------------------+
-| Commit                           | `51f7e68` — "Fix ancillary cache dtype overflow causing NaN rTOC"                             |
-+----------------------------------+-----------------------------------------------------------------------------------------------+
++------------------+-----------------------------------------------------------------------------------------------+
+| Aspect           | Description                                                                                   |
++==================+===============================================================================================+
+| Issue            | The ancillary Zarr cache stored `T10M` and `SLP` as float16                                   |
++------------------+-----------------------------------------------------------------------------------------------+
+| Root cause       | `smaccl.c3s_lib.Ps()` computes `log(R·T)` where $R\cdot T = 287.058 \times 290 \approx 83246$ |
++------------------+-----------------------------------------------------------------------------------------------+
+| Overflow         | 83246 exceeds the float16 max (65504) → NaN in the pressure correction → NaN `Rtoc`           |
++------------------+-----------------------------------------------------------------------------------------------+
+| Fix              | `_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}` keeps these two fields as float32               |
++------------------+-----------------------------------------------------------------------------------------------+
+| Commit           | `51f7e68` — "Fix ancillary cache dtype overflow causing NaN rTOC"                             |
++------------------+-----------------------------------------------------------------------------------------------+
 
 : Float32 overflow fix for SLP/T10M
 
@@ -2111,7 +2242,7 @@ Fields with small values (approximately 0-0.1) are safely stored as float16:
 
 These are widened to float32 on NetCDF write (netCDF4 has no native half-float type).
 
-## D.3 Known Limitations — Status in v1.1
+## Unimplemented Features and Future Work
 
 ### Adjacency Effects
 
@@ -2123,9 +2254,9 @@ Future work: implement a semi-empirical adjacency correction (e.g. based on scen
 
 ### Köppen-Geiger Regionalization
 
-Status: **Planned feature.**
+Status: **Implemented.**
 
-The AOD uncertainty model (Section 5.3.5, Eq. before Table 6) currently uses a single global relation. Regional multipliers based on Köppen-Geiger climate classification are defined but not yet applied in `compute_urtoc()`:
+The AOD uncertainty model (Section 5.3.5, Eq. before Table 6) uses a global base relation scaled by regional multipliers derived from Köppen-Geiger climate classes. Multipliers are applied to `Dtaup` before uncertainty propagation in `compute_urtoc()`:
 
 | Region Type          | Multiplier | Example Locations          |
 |----------------------|------------|----------------------------|
@@ -2135,9 +2266,9 @@ The AOD uncertainty model (Section 5.3.5, Eq. before Table 6) currently uses a s
 | Biomass burning      | 1.4×       | Amazon, Sub-Saharan Africa |
 | High pollution       | 1.3×       | East Asia, South Asia      |
 
-: Köppen-Geiger regional AOD uncertainty multipliers (planned)
+: Köppen-Geiger regional AOD uncertainty multipliers (implemented)
 
-Data available: `kg_zoneNumGueymard.csv` in the ANCILLARY directory.
+Data sources used in code: `kp_map_file` (classification map) and `mapping_file` (`kg_zoneNumGueymard.csv`).
 
 ### Water Vapor Uncertainty
 
@@ -2147,7 +2278,7 @@ Impact: may overestimate total uncertainty in dry conditions.
 
 Future work: refined characterization from MERRA-2 validation studies.
 
-## D.4 Tile Processing Architecture
+## Tile Processing Architecture
 
 The processing pipeline uses a tile-based architecture for memory-bounded, parallel execution:
 
@@ -2184,7 +2315,7 @@ process_batched() -- Main entry point
 9.  Build quality flags (`build_flag()`)
 10. Write the tile to the output NetCDF
 
-## D.5 Output Format Details
+## Output Format Details
 
 The output NetCDF file follows CF-1.8 conventions, with attributes applied from `cf_attributes_res2.json`.
 
@@ -2217,7 +2348,7 @@ Each variable also carries `standard_name`, `units`, `long_name`, and `comments`
 
 This appendix documents the SMACCL OpenCL function API as implemented in the HYGEOS `smaccl` repository (OpenCL branch), covering both the Python host wrapper API (`smaccl/smaccl.py`, class `Smaccl`) and the OpenCL kernel API (`smaccl/devicecl.cl`, kernel `smaccl`). It complements the description of the SMAC-CL function given in Appendix C.5, providing a precise implementation-facing contract for integration and maintenance.
 
-## E.1 Python Host API
+## Python Host API
 
 **Signature:**
 
@@ -2259,12 +2390,17 @@ All returned arrays are float32 and shaped like `rtoa`.
 
 **Shape contract** (4D tensor layout for tiled processing):
 
-| Array | Shape |
-|----|----|
-| `rtoa` | (NBAND, NZ, XBLOCK, XGRID) |
-| `tetas`, `tetav`, `phis`, `phiv`, `uh2o`, `uo3`, `taup550`, `pression` | (NZ, XBLOCK, XGRID) |
-| `k1p`, `k2p` | (NBAND, NZ, XBLOCK, XGRID) |
-| `iaero` | (Naero, NZ, XBLOCK, XGRID) |
++------------------------------------------------------------------------+----------------------------+
+| Array                                                                  | Shape                      |
++========================================================================+============================+
+| `rtoa`                                                                 | (NBAND, NZ, XBLOCK, XGRID) |
++------------------------------------------------------------------------+----------------------------+
+| `tetas`, `tetav`, `phis`, `phiv`, `uh2o`, `uo3`, `taup550`, `pression` | (NZ, XBLOCK, XGRID)        |
++------------------------------------------------------------------------+----------------------------+
+| `k1p`, `k2p`                                                           | (NBAND, NZ, XBLOCK, XGRID) |
++------------------------------------------------------------------------+----------------------------+
+| `iaero`                                                                | (Naero, NZ, XBLOCK, XGRID) |
++------------------------------------------------------------------------+----------------------------+
 
 : SMACCL host API shape contract
 
@@ -2272,7 +2408,7 @@ Where `NBAND` is the number of spectral bands handled in the call, `NZ` is the p
 
 **Runtime behavior:** (1) allocate output buffers for `rsurf`, `rsurf_0`, `dev_std` and the Jacobians; (2) copy host arrays to OpenCL buffers; (3) launch the OpenCL kernel `smaccl`; (4) copy outputs from device to host arrays.
 
-## E.2 OpenCL Kernel API
+## OpenCL Kernel API
 
 **Signature (`devicecl.cl`):**
 
@@ -2300,7 +2436,7 @@ __kernel void smaccl(
 - `dtau_rel = 0.1` for the relative AOD perturbation
 - `NRUN = 3 + NBLOOPd`: 1 reference run + 2 perturbation runs for the finite-difference Jacobians ($P_s$, $\tau_{550}$) + `NBLOOPd` optional additional looped runs
 
-## E.3 Output Mapping
+## Output Mapping
 
 The host API output tuple maps to the AC physics described in Sections 3 and 5 as follows:
 
@@ -2317,7 +2453,7 @@ The host API output tuple maps to the AC physics described in Sections 3 and 5 a
 
 : SMACCL kernel output variable mapping
 
-## E.4 ISmaccl Wrapper API
+## ISmaccl Wrapper API
 
 The integration layer `ISmaccl` wraps the kernel API for product-level execution.
 
@@ -2352,12 +2488,13 @@ This extends the kernel outputs by including uncertainty-input terms (`D*`) comp
 
 **Band handling in Proba-V mode:** the wrapper executes two calls — a VIS/NIR group using `VZA`/`VAA`, and a SWIR group using `VZA_IR`/`VAA_IR` — then merges the outputs into full 4-band products.
 
-## E.5 Device and Data Contracts
+## Device and Data Contracts
 
 **Data type and ordering requirements:** arrays are converted to C-order contiguous layout; floating inputs are cast to float32; the aerosol index array is cast to integer (int16/int32 depending on the processing stage); invalid geolocation values are sanitized before kernel packing; padded extended arrays (`GSIZEXT`) are filled with NaN then reshaped to the launch geometry.
 
 **Device and queue selection:** `Smaccl.__init__` compiles the kernel source and creates the queue/context via `set_queue(xpu, environment)`. The repository implementation supports the following environment mapping:
 
+::: {style="font-size: 8pt;"}
 | Environment  | CPU device name             | GPU device name |
 |--------------|-----------------------------|-----------------|
 | `Default`    | Portable Computing Language | NVIDIA CUDA     |
@@ -2365,6 +2502,7 @@ This extends the kernel outputs by including uncertainty-input terms (`D*`) comp
 | `TerraScope` | Intel(R) OpenCL             | NVIDIA CUDA     |
 
 : OpenCL device/environment mapping
+:::
 
 If no compatible/available device is found, initialization fails.
 

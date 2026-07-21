@@ -1,13 +1,11 @@
 from probav_vito import Level1_probav
 from fdr4vgt.spotvgt_vito import Level1_spotvgt
 import xarray as xa
-from datetime import date, datetime
+
 from netCDF4 import Dataset, set_chunk_cache
 import numpy as np
 from glob import glob
-import dask as dk
 from core import interpolate
-from funcs import memory_tracker
 
 
 # Définition des attributs CF standards
@@ -155,8 +153,6 @@ def create_nc(filename, gl_size, bands, attrs, version):
     for att, value in attrs:
         out.setncattr(att, value)
 
-    out.date_created = str(datetime.now())
-
     width = gl_size[1]
     height = gl_size[0]
 
@@ -294,112 +290,3 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
             out.variables[var_out][y_start:y_end, x_start:x_end] = ds_in[var_in].values
     if close_after:
         out.close()
-
-def save_nc(ds, filename):
-    '''
-    Save an xarray.Dataset to a NetCDF file following CF conventions.
-    '''
-    out = xa.Dataset()
-    
-    # Définition des attributs CF standards
-#    cf_attrs = {
-#        'lat': {
-#            'standard_name': 'latitude',
-#            'long_name': 'Latitude',
-#            'units': 'degrees_north',
-#        },
-#        'lon': {
-#            'standard_name': 'longitude',
-#            'long_name': 'Longitude',
-#            'units': 'degrees_east',
-#        },
-#        'SZA': {
-#            'standard_name': 'solar_zenith_angle',
-#            'long_name': 'Solar zenith angle',
-#            'units': 'degrees',
-#            'valid_min': 0.0,
-#            'valid_max': 90.0
-#        },
-#        'SAA': {
-#            'standard_name': 'solar_azimuth_angle',
-#            'long_name': 'Solar azimuth angle',
-#            'units': 'degrees',
-#            'valid_min': 0.0,
-#            'valid_max': 360.0
-#        },
-#        'VZA': {
-#            'standard_name': 'sensor_zenith_angle',
-#            'long_name': 'Sensor zenith angle',
-#            'units': 'degrees',
-#            'valid_min': 0.0,
-#            'valid_max': 90.0
-#        },
-#        'VAA': {
-#            'standard_name': 'sensor_azimuth_angle',
-#            'long_name': 'Sensor azimuth angle',
-#            'units': 'degrees',
-#            'valid_min': 0.0,
-#            'valid_max': 360.0
-#        },
-#        'VZA_IR': {
-#            'standard_name': 'sensor_zenith_angle',
-#            'long_name': 'SWIR sensor zenith angle',
-#            'units': 'degrees',
-#            'valid_min': 0.0,
-#            'valid_max': 90.0
-#        },
-#        'VAA_IR': {
-#            'standard_name': 'sensor_azimuth_angle',
-#            'long_name': 'SWIR sensor azimuth angle',
-#            'units': 'degrees',
-#            'valid_min': 0.0,
-#            'valid_max': 360.0
-#        },
-#        'TOC': {
-#            'standard_name': 'top_of_canopy_reflectance',
-#            'long_name': 'Top of canopy reflectance',
-#            'units': '1',
-#            'valid_min': 0.0,
-#            'valid_max': 1.0
-#        },
-#    }
-
-    # Ajouter les attributs globaux
-#    out.attrs = {
-#        'Conventions': 'CF-1.8',
-#        'title': 'PROBA-V Level 1 data',
-#        'institution': 'VITO',
-#        'source': 'PROBA-V satellite observations',
-#        'history': f'Created {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
-#        'references': 'https://proba-v.vgt.vito.be/',
-#    }
-
-    # save geometry with CF attributes
-    for var in ['lat', 'lon', 'SZA', 'SAA', 'VZA', 'VAA', 'VZA_IR', 'VAA_IR']:
-        if var in ds.variables.keys():
-            out[var] = ds[var]
-            # Fusionner les attributs existants avec les attributs CF
-            existing_attrs = ds[var].attrs if hasattr(ds[var], 'attrs') else {}
-            out[var].attrs = {**cf_attrs[var], **existing_attrs}
-
-    for iband, band in enumerate(ds.attrs['bands']):
-        if 'rsurf_best' in ds.variables.keys():
-            var = 'rsurf_best_{}'.format(band)
-            out[var] = ds['rsurf_best'][iband]
-            existing_attrs = ds['rsurf_best'].attrs if hasattr(ds['rsurf_best'], 'attrs') else {}
-            out[var].attrs = {**cf_attrs['TOC'], **existing_attrs}
-        if 'rsurf_mean' in ds.variables.keys():
-            var = 'rsurf_mean_{}'.format(band)
-            out[var] = ds['rsurf_mean'][iband]
-
-#        if 'TOC' in ds.variables.keys():
-#            var =  'TOC_{}'.format(band)
-#            out[var] = ds['TOC'][iband]
-#            existing_attrs = ds['TOC'].attrs if hasattr(ds['TOC'], 'attrs') else {}
-#            out[var].attrs = {**cf_attrs['TOC'], **existing_attrs}
-
-        if 'jacobians' in ds.variables.keys():
-            for ijac, jac in enumerate(ds.attrs['jac_name']):
-                out['{}_{}'.format(jac, band)] = ds['jacobians'][ijac, iband]
-
-    out.to_netcdf(filename)
