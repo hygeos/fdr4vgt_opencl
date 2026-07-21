@@ -1,0 +1,17 @@
+title: Copernicus Documentation Theme
+authors:
+  - name: Copernicus Team
+version: 0.1.0
+quarto-version: ">= 1.4.0"
+contributes:
+  formats:
+    copernicus-docs:
+      html:
+        css: css/copernicus-docs.css
+        theme:
+          light: cosmo
+          dark: darkly
+        toc: true
+    copernicus-docx:
+      docx:
+        reference-doc: ../../../FDR4VGT-AC-ATBD_v1.0.docx

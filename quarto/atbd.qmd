@@ -1,0 +1,1324 @@
+---
+title: "FDR4VGT Atmospheric Correction"
+subtitle: "Algorithm Theoretical Basis Document (ATBD)"
+version: "1.1"
+reference: FDR4VGT-AC-ATBD
+client: C3S
+contrat: FDR4VGT
+date: today
+author:
+  - "HYGEOS"
+
+format:
+  pdf:
+    pdf-engine: xelatex
+    template: _extensions/hygeos/resources/templates/hygeos-template.tex
+
+toc: true
+number-sections: true
+fontsize: 11pt
+---
+
+<!-- Ajout d'une table des matières -->
+
+\tableofcontents
+{{< pagebreak >}}
+
+<!-- Ajout d'une table des figures et des tableaux -->
+
+\listoftables
+{{< pagebreak >}}
+
+## Version History
+
+| Version | Date       | Author(s) | Description |
+|---------|------------|-----------|-------------|
+| v1.0    | 2024-01-XX | HYGEOS    | Initial ATBD for FDR4VGT atmospheric correction |
+| v1.1    | 2025-07-17 | HYGEOS    | Implementation notes, performance optimizations, float32 fix, known limitations |
+| v1.1    | 2026-07-17 | HYGEOS    | Addendum: Appendix E with SMACCL OpenCL kernel and wrapper API contract |
+
+**Contributors:** HYGEOS S.A., Brussels, Belgium
+
+## Acronyms
+
+| Acronym | Definition |
+|---------|------------|
+| AC      | Atmospheric Correction |
+| AERONET | AErosol RObotic NETwork |
+| AOD     | Aerosol Optical Depth |
+| AMIP    | Atmospheric Model Intercomparison Project |
+| ARTDECO | Atmospheric Radiative Transfer Data Centre |
+| BRDF    | Bidirectional Reflectance Distribution Function |
+| CAMS    | Copernicus Atmosphere Monitoring Service |
+| C3S     | Copernicus Climate Change Service |
+| CF      | Climate and Forecast (metadata conventions) |
+| CTM     | Chemical Transport Model |
+| DEM     | Digital Elevation Model |
+| DTOA-r  | Error on TOA reflectance |
+| FDR     | Full Dynamic Range |
+| FIDUCEO | Fiducial Data for Earth Observation |
+| GPU     | Graphics Processing Unit |
+| HITRAN  | High-Resolution Transmission Molecular Database |
+| L1C     | Level 1C (TOA reflectance product) |
+| L2A     | Level 2A (TOC reflectance product) |
+| LUT     | Look-Up Table |
+| MERRA-2 | Modern-Era Retrospective analysis for Research and Applications, Version 2 |
+| MLP     | Multi-Layer Perceptron |
+| NA      | Not Applicable |
+| ONNX    | Open Neural Network Exchange |
+| OPAC    | Optical Properties of Aerosols and Clouds |
+| PDF     | Probability Density Function |
+| PSF     | Point Spread Function |
+| RAA     | Relative Azimuth Angle |
+| RMSE    | Root Mean Square Error |
+| RTM     | Radiative Transfer Model |
+| RSRF    | Relative Spectral Response Function |
+| SMAC    | Simplified Method for Atmospheric Correction |
+| SMAC-CL | SMAC implementation in OpenCL |
+| SZA     | Solar Zenith Angle |
+| TOA     | Top of Atmosphere |
+| TOC     | Top of Canopy |
+| UH₂O    | Total Column Water Vapor |
+| UO₃     | Total Column Ozone |
+| VGT     | Vegetation Monitoring Tool (SPOT) |
+| VZA     | View Zenith Angle |
+| VAA     | View Azimuth Angle |
+
+{{< pagebreak >}}
+
+# Introduction
+
+This Algorithm Theoretical Basis Document (ATBD) describes the atmospheric correction (AC) algorithm for the Full Dynamic Range (FDR) Vegetation Monitoring Tool (VGT) product, including both SPOT-VGT and Proba-V sensors. The algorithm implements the Simplified Method for Atmospheric Correction (SMAC) with rigorous uncertainty propagation following the FIDUCEO (Fiducial Data for Earth Observation) methodology.
+
+**Version 1.1 updates:**
+
+- Documents all performance optimizations implemented in the production codebase (tile processing, Zarr caching, local I/O, COW shared state)
+- Specifies float32 data type requirement for SLP/T10M fields to prevent float16 overflow in pressure computation
+- Updates DEM interpolation note (linear interpolation improvement over nearest-neighbor)
+- Documents Köppen-Geiger regionalization as a planned feature
+- Confirms adjacency effects as a known limitation
+- Adds implementation-specific details (tile grid, ONNX model inputs, quality flag bits, output NetCDF variables)
+- Adds the SMACCL OpenCL kernel and Python wrapper API contract (Appendix E)
+
+The FDR4VGT AC algorithm provides:
+
+- **Top-of-Canopy (TOC) directional reflectance** for 4 spectral bands (Blue, Red, NIR, SWIR)
+- **Complete uncertainty budget** with propagation of all major uncertainty sources
+- **Quality flags** for cloud contamination, high AOD, high solar zenith angle, and AOD gradients
+- **Jacobian matrices** for sensitivity analysis of TOC reflectance to input parameters
+
+# Input and Auxiliary Data
+
+## Level-1C Input
+
+The input data is the Level-1C (L1C) FDR product, which provides TOA reflectance at the sensor spectral bands with associated geometry and quality information.
+
+**Supported sensors:**
+
+| Sensor | Bands | Spatial Resolution |
+|--------|-------|-------------------|
+| SPOT-VGT | B1 (Blue), B2 (Red), B3 (NIR), B4 (SWIR) | ~1 km (nadir) |
+| Proba-V | B1 (Blue), B2 (Red), B3 (NIR), B4 (SWIR) | ~1 km (nadir) |
+
+: Supported sensors and bands {#tbl-sensors}
+
+**Required input variables:**
+
+| Variable | Description | Dimensions |
+|----------|-------------|------------|
+| `TOA` | TOA reflectance | (bands, y, x) |
+| `DTOA-r` | TOA reflectance error | (bands, y, x) |
+| `SZA` | Solar Zenith Angle | (y, x) |
+| `SAA` | Solar Azimuth Angle | (y, x) |
+| `VZA` | View Zenith Angle (VNIR) | (y, x) |
+| `VAA` | View Azimuth Angle | (y, x) |
+| `VZA_IR` | View Zenith Angle (SWIR, Proba-V) | (y, x) |
+| `VAA_IR` | View Azimuth Angle (SWIR, Proba-V) | (y, x) |
+| `clm` | Cloud mask | (y, x) |
+| `lat` | Latitude | (y, x) |
+| `lon` | Longitude | (y, x) |
+
+: Required L1C input variables {#tbl-l1c-vars}
+
+**Notes:**
+
+- Proba-V has a dual-FOV sensor (VNIR and SWIR with different viewing geometries), hence separate `VZA_IR`/`VAA_IR` for the SWIR band
+- Cloud mask (`clm`) values: 0 = clear, non-zero = cloud-contaminated
+- Sensor readers use `core.interpolate` for resampling (generic xarray-based interpolation)
+
+## Digital Elevation Model
+
+The Digital Elevation Model (DEM) provides terrain elevation for surface pressure correction and terrain effect estimation.
+
+**Source:** GTOPO30 (90m global resolution)
+
+**Fields:**
+
+| Field | Description | Units |
+|-------|-------------|-------|
+| `elev` | Terrain elevation | meters |
+| `Delev` | Elevation difference (for uncertainty) | meters |
+
+: DEM fields {#tbl-dem-fields}
+
+**Interpolation:** Linear interpolation to satellite grid
+
+> **Implementation Note (v1.1):** The implementation uses linear interpolation (via `scipy.interpolate.RegularGridInterpolator`) rather than the nearest-neighbor method specified in ATBD v1.0. This is a **reasonable improvement** — linear interpolation provides smoother elevation transitions at tile boundaries. The impact is negligible for the 90m GTOPO30 resolution vs ~1km VGT pixels.
+
+**DEM Cropping (v1.1):** The global GTOPO30 DEM is cropped to the product's lat/lon extent before loading, reducing memory from ~1.9 GB to ~0.2 GB for typical narrow longitude ranges.
+
+## MERRA-2 Auxiliary Data
+
+MERRA-2 (Modern-Era Retrospective analysis for Research and Applications, Version 2) provides atmospheric state variables for atmospheric correction.
+
+**Source:** MERRA-2 instantaneous 2D aerosol and meteorological fields
+
+**Required fields:**
+
+| Variable | Description | MERRA-2 Unit | SMAC Unit | Conversion |
+|----------|-------------|--------------|-----------|------------|
+| `TO3` | Total ozone column | Dobson | cm.atm | ×1e-3 |
+| `TQV` | Total column water vapor | kg.m⁻² | g.cm⁻² | ×1e-1 |
+| `SLP` | Sea-level pressure | Pa | hPa | ×1e-2 |
+| `T10M` | Temperature at 10m | K | K | — |
+| `TOTEXTTAU` | Total AOD at 550nm | — | — | — |
+
+: MERRA-2 fields and unit conversions {#tbl-merra2-fields}
+
+**Aerosol species fractions:**
+
+| Variable | Description |
+|----------|-------------|
+| `SU_FRAC` | Sulfate fraction |
+| `DU_FRAC` | Dust fraction |
+| `OC_FRAC` | Organic carbon fraction |
+| `SS_FRAC` | Sea salt fraction |
+| `BC_FRAC` | Black carbon fraction |
+
+: Aerosol species fractions {#tbl-aerosol-species}
+
+**Interpolation:** `scipy.interpolate.RegularGridInterpolator` with `method='linear'` (mathematically equivalent to bilinear interpolation for regular grids). Temporal interpolation includes time as a third dimension (3D interpolation: time, lat, lon).
+
+> **Implementation Note (v1.1):** The implementation pre-interpolates MERRA-2 fields to the full satellite grid once and stores them in a local Zarr cache (`precompute_ancillary()`). Tiles are then sliced from the local cache. This is numerically equivalent to per-tile interpolation but provides significant I/O performance improvement (see @sec-perf-opt).
+
+> **Critical Data Type Requirement (v1.1):** `SLP` and `T10M` fields **must be stored as float32** (not float16) in the ancillary cache. The surface pressure computation `Ps()` in `smaccl.c3s_lib` evaluates `log(R*T)` where `R*T = 287.058 × 290 ≈ 83246`, which exceeds the float16 maximum value (65504), causing overflow and NaN propagation. This is enforced via `_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}` in the implementation.
+
+## AMIP Ensemble
+
+The AMIP (Atmospheric Model Intercomparison Project) ensemble provides 10 members of monthly aerosol climatology for uncertainty estimation through ensemble spread.
+
+**Source:** MERRA-2 AMIP-10 ensemble reanalysis (`m2amip01.tavgM_2d_aer_Nx.*.nc4`)
+
+**Fields:** Same aerosol fields as MERRA-2, per ensemble member
+
+**Processing:**
+
+- 10 ensemble members are loaded monthly
+- Monthly climatology is computed (no temporal interpolation)
+- For years 2018-2020, the 2017 climatology is used as fallback
+- Each ensemble member provides a complete set of aerosol species for model selection
+
+**Aerosol model selection from AMIP:** For each ensemble member `j`, the closest aerosol model `iaero_AMIPj` is selected using the same Euclidean distance method as for the primary MERRA-2 data (see @sec-aerosol-selection).
+
+## SMAC Coefficients
+
+SMAC coefficients are pre-computed lookup tables that parameterize the radiative transfer model for 148 aerosol models.
+
+**Format:** Pre-computed `.npy` or `.nc` files
+
+**Structure:**
+
+| Dimension | Size | Description |
+|-----------|------|-------------|
+| Aerosol models | 148 | Predefined aerosol mixtures (see Appendix B) |
+| Bands | 4 | VIS-NIR (B1-B3) + SWIR (B4) |
+| Coefficients | Variable | SMAC polynomial coefficients |
+
+: SMAC coefficient table structure {#tbl-smac-coeffs}
+
+**Coefficient indices:** Stored in `ca_ind` dictionary mapping names (`a0taup`, `a1taup`, `taur`, etc.) to array indices.
+
+**Loading:** `read_smac_coefficients()` supports both `.npy` (structured array) and `.nc` (NetCDF) formats with shape homogenization for broadcast compatibility.
+
+## C3S Surface Albedo / BRDF
+
+The C3S (Copernicus Climate Change Service) Multi-Sensor Surface Albedo product provides BRDF coefficients for non-Lambertian surface correction.
+
+**Source:** C3S L3 BRDF product (RossThick-LiSparse-R model)
+
+**Fields:**
+
+| Field | Description |
+|-------|-------------|
+| `k0` | Isotropic albedo coefficient |
+| `k1` | Geometric kernel coefficient |
+| `k2` | Volumetric kernel coefficient |
+
+: C3S BRDF fields {#tbl-brdf-fields}
+
+**Normalization:** BRDF shape parameters are normalized as:
+
+$$k_{1}^{p} = \frac{k_{1}}{k_{0}} ;\ k_{2}^{p} = \frac{k_{2}}{k_{0}}$$
+
+**Usage:** In the baseline run, the surface is assumed Lambertian (`k1p = k2p = 0`). A second run with BRDF coefficients from C3S allows estimation of the BRDF effect on TOC reflectance.
+
+**Interpolation:** Bilinear interpolation to satellite grid via `load_brdf()`.
+
+# Atmospheric Correction Algorithm
+
+## SMAC Overview
+
+The Simplified Method for Atmospheric Correction (SMAC) approximates the radiative transfer equation with fast polynomial fits pre-computed from a dense sampling of exact RTM (6S/ARTDECO) simulations.
+
+**Core equations:**
+
+The TOA reflectance is modeled as:
+
+$$R_{toa} = T_{dir} \cdot R_{toc} \cdot e^{-\frac{\tau}{\mu_s}} + R_{a} + R_{as} \qquad (1)$$
+
+Where:
+
+- $T_{dir}$: Direct atmospheric transmission
+- $R_{toc}$: TOC reflectance (unknown to be solved)
+- $\tau$: Total atmospheric optical depth (aerosol + Rayleigh)
+- $\mu_s = \cos(\theta_s)$: Cosine of solar zenith angle
+- $R_a$: Atmospheric reflectance (Rayleigh scattering only)
+- $R_{as}$: Aerosol scattering reflectance
+
+The atmospheric correction inverts this equation:
+
+$$R_{toc} = \frac{R_{toa} - R_{a} - R_{as}}{T_{dir} \cdot e^{-\frac{\tau}{\mu_s}}} \qquad (2)$$
+
+The atmospheric correction factor ($\eta$) is:
+
+$$\eta = \frac{1}{T_{dir} + s_{atm} \cdot R_{toc}} \qquad (3)$$
+
+Where $s_{atm}$ accounts for multiple scattering between atmosphere and surface.
+
+**Gaseous absorption:** SMAC coefficients include pre-fitted gaseous transmission terms for O₃ and H₂O:
+
+$$T_{gas} = \exp\left(-a \cdot (m \cdot U_{gas})^n\right) \qquad (4)$$
+
+Where $m$ is the air mass, $U_{gas}$ is the gas column amount, and $a$, $n$ are SMAC coefficients fitted from line-by-line RT calculations (HITRAN database).
+
+## Sensitivities and Jacobians
+
+The uncertainty propagation requires the sensitivity of $R_{toc}$ to each input parameter (Jacobian matrices).
+
+**Analytical Jacobians:**
+
+| Parameter | Jacobian | Method |
+|-----------|----------|--------|
+| $R_{toa}$ | $J_{R_{toa}} = \partial R_{toc}/\partial R_{toa}$ | Analytical (Eq. 6-7) |
+| $U_{O3}$ | $J_{U_{O3}} = \partial R_{toc}/\partial U_{O3}$ | Analytical (Eq. 8-13) |
+| $U_{H2O}$ | $J_{U_{H2O}} = \partial R_{toc}/\partial U_{H2O}$ | Analytical (Eq. 8-13) |
+
+: Analytical Jacobians {#tbl-analytical-jacobians}
+
+**Finite-difference Jacobians:**
+
+| Parameter | Jacobian | Perturbation |
+|-----------|----------|-------------|
+| $P_s$ | $J_{P_s} = \partial R_{toc}/\partial P_s$ | $\delta P_s$ = 10 hPa |
+| $\tau_a^{550}$ | $J_{\tau_a} = \partial R_{toc}/\partial \tau_a$ | $\delta\tau$ = 0.1$\cdot\tau$ |
+
+: Finite-difference Jacobians {#tbl-fd-jacobians}
+
+All Jacobians are computed in the SMAC-CL OpenCL kernel (pixel-parallel execution).
+
+## Atmospheric Transmissions
+
+The total atmospheric transmission is decomposed into:
+
+$$T = T_{dir} + T_{dif} \qquad (5)$$
+
+Where:
+
+- $T_{dir}$: Direct (beam) transmission
+- $T_{dif}$: Diffuse (scattered) transmission
+
+**Optical depths:**
+
+Aerosol optical depth (from SMAC coefficients):
+
+$$\tau_a = a_0 + a_1 \cdot AOD_{550} \qquad (6)$$
+
+Rayleigh optical depth (from SMAC coefficients):
+
+$$\tau_r = \tau_{r,coeff} \cdot P \qquad (7)$$
+
+Where $P$ is the equivalent pressure.
+
+# Quality Flags
+
+Quality flags are constructed as a bitfield (int16) with the following bits:
+
+| Bit | Name | Condition | Description |
+|-----|------|-----------|-------------|
+| 0 | Cloud | `clm != 0` | Cloud-contaminated pixel |
+| 1 | High AOD | `TOTEXTTAU >= 0.6` | High aerosol loading |
+| 2 | High SZA | `SZA > 80°` | Large solar zenith angle |
+| 3 | AOD Gradient | `aod_grad > threshold` | High AOD spatial gradient |
+| 4 | AC Failure | `rTOC` is NaN/invalid | Atmospheric correction algorithm failure |
+| 5 | Missing Aux | MERRA-2 field is NaN | Missing auxiliary data |
+| 6 | Out of LUT | Coefficient bounds exceeded | Out of SMAC lookup table range |
+
+: Quality flag bit definitions {#tbl-quality-flags}
+
+**Flag construction:** `build_flag()` in `funcs.py` implements all 7 flag bits with configurable thresholds.
+
+**AOD gradient:** Computed as `aod_grad = sqrt(gradient_y² + gradient_x²)` using `da.gradient()` (dask gradient).
+
+# Uncertainty Analysis
+
+## Primary Uncertainty Equation
+
+Following the FIDUCEO methodology, the total uncertainty on $R_{toc}$ is computed by propagating all input uncertainties through the measurement equation:
+
+$$u^2(R_{toc}) = \sum_{i=1}^{7} J_i^2 \cdot u^2(x_i) + u^2_{ensemble} + u^2_{BRDF} + u^2_{RTM} + u^2(0) \qquad (19)$$
+
+Where the 7 propagated effects are:
+
+| Effect | Parameter | Jacobian | Uncertainty |
+|--------|-----------|----------|-------------|
+| 1 | $R_{toa}$ | $J_{R_{toa}}$ | $u(R_{toa})$ from L1C |
+| 2 | $U_{H2O}$ | $J_{U_{H2O}}$ | $u(U_{H2O})$ from MERRA-2 |
+| 3 | $U_{O3}$ | $J_{U_{O3}}$ | $u(U_{O3})$ from MERRA-2 |
+| 4 | $P_s$ | $J_{P_s}$ | $u(P_s)$ from DEM + meteo |
+| 5 | $\tau_a^{550}$ | $J_{\tau_a}$ | $u(\tau_a)$ from validation |
+| 6 | Aerosol model | — | Ensemble spread |
+| 7 | RTM approximation | — | BRDF + terrain + SMAC fit |
+
+: The 7 propagated uncertainty effects {#tbl-seven-effects}
+
+**Implementation:** `compute_urtoc()` in `process.py` implements Eq. 19 with all 9 terms, returning both total uncertainty and individual component absolute values for diagnostics.
+
+## Uncertainty Effects
+
+### Effect 1: TOA Reflectance Uncertainty
+
+The TOA reflectance uncertainty is derived from the L1C product error components:
+
+$$\sigma(R_{toa}) = \sqrt{u_{random}^2 + u_{structured}^2 + u_{systematic}^2} \qquad (20)$$
+
+Where `UNC_RANDOM`, `UNC_STRUCTURED`, and `UNC_SYSTEMATIC` are band-dependent uncertainty components from the L1C DTOA-r product.
+
+### Effect 2: Ozone Uncertainty
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Relative uncertainty | 6% of UO₃ | Wargan et al. (2017), Davis et al. (2017) |
+| Spatial correlation | ~500 km (synoptic) | Meteorological scale |
+| Temporal correlation | ~3 days | Ozone lifetime |
+
+: Ozone uncertainty parameters {#tbl-ozone-unc}
+
+### Effect 3: Water Vapor Uncertainty
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Relative uncertainty | 20% of UH₂O | Conservative estimate |
+| Spatial correlation | ~200 km (convective) | Meteorological scale |
+| Temporal correlation | ~1 day | Water vapor lifetime |
+
+: Water vapor uncertainty parameters {#tbl-h2o-unc}
+
+### Effect 4: Surface Pressure Uncertainty
+
+Surface pressure is computed from MERRA-2 sea-level pressure corrected for terrain elevation:
+
+$$P_s = P_0 \cdot \exp\left(-\frac{g \cdot \Delta h}{R \cdot T}\right) \qquad (21)$$
+
+Where:
+
+- $P_0$: Sea-level pressure from MERRA-2 SLP
+- $g = 9.80665$ m/s²: Gravitational acceleration
+- $R = 287.058$ J/(kg·K): Gas constant for dry air
+- $\Delta h = h_{pixel} - h_{MERRA}$: Elevation difference
+- $T = T_{10M}$: Temperature at 10m from MERRA-2
+
+The pressure uncertainty combines meteorological and elevation components:
+
+$$u(P_s) = \frac{\sqrt{(\Delta_{P_s}^{\lambda})^2 + (\Delta_{P_s}^{z})^2}}{2} \qquad (22)$$
+
+Where $\Delta_{P_s}^{\lambda} \approx 1$ hPa (meteorological model uncertainty) and $\Delta_{P_s}^{z}$ from DEM elevation uncertainty.
+
+> **Critical Implementation Note (v1.1):** The computation of $P_s$ involves the term $\log(R \cdot T)$ in the `smaccl.c3s_lib.Ps()` function. For typical temperatures $T \approx 290$ K, the product $R \cdot T = 287.058 \times 290 \approx 83246$ exceeds the float16 maximum value (65504), causing overflow and NaN propagation through all downstream computations. **Therefore, `SLP` and `T10M` fields must be stored and processed as float32.** This is enforced in the implementation via `_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}`.
+
+### Effect 5: AOD Uncertainty
+
+The AOD uncertainty model is based on comprehensive MERRA-2 validation against AERONET (Gueymard & Yang, 2020):
+
+$$\sigma\left( \tau_{a}^{550} \right) = \max\left( \sigma_{base},\ \sigma_{relative} \times \tau_{a}^{550} \right) \qquad (23)$$
+
+Where:
+
+- $\sigma_{base} = 0.03$ (clean atmosphere baseline)
+- $\sigma_{relative} = 0.15$ (15% relative uncertainty)
+
+**Regional multipliers (planned feature):**
+
+| Region Type | Multiplier | Example Locations |
+|-------------|------------|-------------------|
+| Oceanic/Polar | 0.7× | Open oceans, Arctic |
+| North America/Europe | 1.0× | Baseline reference |
+| Dust-dominated | 1.5× | Sahara, Arabian Peninsula |
+| Biomass burning | 1.4× | Amazon, Sub-Saharan Africa |
+| High pollution | 1.3× | East Asia, South Asia |
+
+: Köppen-Geiger regional AOD uncertainty multipliers (planned) {#tbl-kg-multipliers}
+
+> **Implementation Note (v1.1):** Köppen-Geiger climate classification multipliers are documented as a **planned feature** for a future update. The current implementation uses the global model (Eq. 23) without regional multipliers.
+
+### Effect 6: Aerosol Model Uncertainty {#sec-aerosol-selection}
+
+The aerosol model uncertainty is quantified using the AMIP 10-member ensemble spread:
+
+$$u_{ensemble}(R_{toc}) = \text{std}(R_{toc,j}),\ j=1..10 \qquad (24)$$
+
+For each pixel:
+
+1. Select 10 preferred aerosol models from 148 options (based on MERRA-2 species fractions matching AMIP ensemble)
+2. Run SMAC with each model → $R_{toc,1} ... R_{toc,10}$
+3. $u_{ensemble} = \text{standard\_deviation}(R_{toc,j})$
+
+### Effect 7: RTM Approximation Uncertainty
+
+Three sources of RT approximation errors:
+
+#### 7a. Lambertian Surface Assumption (BRDF Effect)
+
+The BRDF effect is estimated by comparing Lambertian vs BRDF-corrected runs:
+
+$$u_{BRDF}(R_{toc}) = R_{toc}(k_{1p}=0, k_{2p}=0) - R_{toc}(k_{1p} \neq 0, k_{2p} \neq 0) \qquad (25)$$
+
+Significance: Moderate (NIR, high AOD). Magnitude: ~1% for most cases, up to 5% for strong BRDF + high AOD.
+
+#### 7b. Terrain Slope Effects
+
+The CESBIO terrain model computes the terrain-induced relative effect:
+
+$$slope_{eff} = \frac{T}{T_{dir} \cdot \frac{\mu_i}{\mu_s} + T_{dif} \cdot f_{sky} + T \cdot f_{ground} \cdot \rho_{env}} \qquad (26)$$
+
+$$u_{terrain}(R_{toc}) = R_{toc} \cdot (slope_{eff} - 1) \qquad (27)$$
+
+Where:
+
+- $\mu_s = \cos(\theta_s)$: Cosine of solar zenith angle
+- $\mu = \cos(s)$: Cosine of terrain slope
+- $\mu_i = \mu_s \cdot \mu + \sqrt{1 - \mu_s^2} \cdot \sqrt{1 - \mu^2} \cdot \cos(\phi_s - \phi_a)$: Effective cosine on tilted surface
+- $f_{sky} = (1 + \mu)/2$: Sky view factor
+- $f_{ground} = (1 - \mu)/2$: Ground view factor
+- $\rho_{env}$: Environment reflectance (assumed equal to pixel reflectance)
+
+Significance: Moderate to High in mountainous regions. Magnitude: Several %, up to 40% in extreme terrain.
+
+#### 7c. SMAC Polynomial Fitting Errors
+
+The SMAC fit uncertainty is estimated using an ONNX (Open Neural Network Exchange) model:
+
+$$u_{RTM\_fit}(R_{toc}) = f_{ONNX}(\text{SZA, VZA, RAA, AOD}, P_s, R_{toc}, \text{iaer, wavelength}) \qquad (28)$$
+
+**ONNX model inputs:**
+
+| Input | Description | Units |
+|-------|-------------|-------|
+| `pression` | Surface pressure | hPa |
+| `iaer` | Aerosol model index | 0-147 |
+| `raa` | Relative azimuth angle | degrees (0-180) |
+| `rtoc` | Surface reflectance | — |
+| `sza` | Solar zenith angle | degrees |
+| `tauaer` | AOD at 550nm | — |
+| `vza` | View zenith angle | degrees |
+| `wvl` | Wavelength | nm |
+
+: ONNX RTM fit uncertainty model inputs {#tbl-onnx-inputs}
+
+Mean square error of the ONNX model: ~0.0097 on predicted RTM uncertainty.
+
+## Second-Order Effects
+
+Effects considered minor and not explicitly propagated:
+
+| Effect | Estimated Magnitude | Justification |
+|--------|---------------------|---------------|
+| Trace gas absorption (CO₂, CH₄, N₂O) | <0.001 | Window channel placement |
+| Rayleigh scattering altitude dependence | <0.002 | Accurate DEM + pressure correction |
+| LUT interpolation errors | <0.001 | Dense sampling validated vs. 6S |
+| Aerosol hygroscopic growth | <0.005 | Implicit in fixed RH=80% model |
+| Polarization | <0.003 | Minor for broad-band sensors |
+| Spectral band mismatch | <0.002 | SMAC computed for actual RSR |
+
+: Second-order uncertainty effects {#tbl-second-order}
+
+**Combined second-order:** $u(0) \approx 0.007$ (added quadratically to total, configurable via `[Coefficients] u2_0` in config).
+
+## Uncertainty Characterization Summary
+
+### Input Uncertainty Estimates
+
+| Input Parameter | Source | Uncertainty Estimate | Notes |
+|-----------------|--------|---------------------|-------|
+| $R_{toa}$ | Level 1C FDR | From DTOA-r | Band-dependent, separated into random/structured/common |
+| $U_{O3}$ | MERRA-2 + literature | 6% | Wargan et al. (2017), Davis et al. (2017) |
+| $U_{H2O}$ | MERRA-2 + estimate | 20% | Conservative, needs validation |
+| $P_0$ | MERRA-2 SLP | <1 hPa | Meteorological model uncertainty |
+| $\lambda$ (lapse rate) | Model assumption | 0.002 K/m | Van Besselaar et al. (2011) |
+| $z$ (elevation) | GTOPO30 + geoloc | $\Delta_{elev}$ (DEM stddev) | Convolution with $\sigma=0.5$ pixels (~0.3 VGT pixel) |
+| $\tau_a^{550}$ | MERRA-2 + validation | max(0.03, 0.15×$\tau_a$) | Gueymard & Yang (2020), regionalization planned |
+| Aerosol model | AMIP ensemble | Ensemble spread | 10-member AMIP runs |
+| RTM approximations | Modelling | 1-30% | Scene dependent. Worst case: rough terrain, high AOD |
+
+: Input uncertainty estimates summary {#tbl-input-unc-summary}
+
+### Correlation Structures
+
+| Effect | Spatial Correlation | Temporal Correlation | Implementation |
+|--------|---------------------|---------------------|----------------|
+| TOA-r (random) | None | None | Average as $\sqrt{\Sigma u^2}/N$ |
+| TOA-r (structured) | Scan-line or column | None | Use L1C correlation matrix |
+| TOA-r (common) | Global | Global | Simple average (no reduction) |
+| $U_{O3}$ | ~500 km (synoptic) | ~3 days | Exponential decay |
+| $U_{H2O}$ | ~200 km (convective) | ~1 day | Exponential decay |
+| $P_s$ (meteorological) | Global | >1 month | Common (no reduction) |
+| $P_s$ (elevation) | DEM resolution | Permanent | Structured (terrain-correlated) |
+| $\tau_a^{550}$ | ~200-500 km (plume) | ~1 week | Exponential decay |
+| Aerosol model | 1° (climatology grid) | 1 week | Rectangle function |
+| RT approximations | Scene-dependent | None | Random or systematic (case-by-case) |
+
+: Correlation structures for propagated uncertainty effects {#tbl-correlation-structures}
+
+## Limitations and Future Improvements
+
+### Known Limitations
+
+| Limitation | Impact | Status |
+|------------|--------|--------|
+| Surface BRDF: Simplified kernel model | Up to 10% error in directional reflectance over non-forest surfaces | Documented |
+| Terrain effect: Simplified model | Several % in mountainous regions | Documented |
+| Water Vapor Uncertainty: Conservative 20% estimate | May overestimate total uncertainty in dry conditions | Future: Refined characterization from MERRA-2 validation |
+| Adjacency Effects: Not corrected | Significant for high-contrast scenes (coast, cloud edge) | Known limitation — no correction applied |
+| Köppen-Geiger regionalization | Regional AOD uncertainty multipliers not applied | Planned feature — data and multipliers defined but not implemented |
+
+: Known limitations and future improvements {#tbl-known-limitations}
+
+# Conclusions
+
+This ATBD demonstrates a comprehensive implementation of the FIDUCEO uncertainty propagation methodology for atmospheric correction of satellite vegetation sensors. Key achievements:
+
+- **Rigorous Uncertainty Quantification**: All major uncertainty sources are identified, characterized, and propagated through the measurement equation
+- **Operational AOD Uncertainty Model**: Based on extensive MERRA-2 validation (Gueymard & Yang 2020), providing realistic AOD uncertainties: $\sigma(\tau_a) = \max(0.03, 0.15 \times \tau_a)$ with regional adjustments planned
+- **Ensemble Approach for Model Uncertainty**: AMIP 10-member ensemble quantifies aerosol optical property uncertainties
+- **Efficient GPU Implementation**: SMAC-CL enables fast processing while computing full Jacobian matrices
+- **Validation Framework**: Following Aerosol_cci and FIDUCEO best practices (Popp & Mittaz 2022)
+
+This approach provides climate-quality TOC reflectances with fully traceable, metrologically sound uncertainties suitable for:
+
+- Long-term surface monitoring
+- Multi-sensor harmonization
+- Climate model validation
+
+{{< pagebreak >}}
+
+# References
+
+**FIDUCEO Methodology:**
+
+- Mittaz, J., Merchant, C.J., Woolliams, E.R. (2019). Applying principles of metrology to historical Earth observations from satellites. *Metrologia*, 56, 032002.
+- Popp, T., Mittaz, J. (2022). Systematic Propagation of AVHRR AOD Uncertainties — A Case Study to Demonstrate the FIDUCEO Approach. *Remote Sensing*, 14(4), 875.
+
+**MERRA-2 Validation:**
+
+- Gueymard, C., Yang, D. (2020). Worldwide validation of CAMS and MERRA-2 reanalysis aerosol optical depth products using 15 years of AERONET observations. *Atmospheric Environment*, 225, 117216.
+- Wargan, K., et al. (2017). Evaluation of the Ozone Fields in NASA's MERRA-2 Reanalysis. *Journal of Climate*, 30, 2961-2988.
+- Davis, S.M., et al. (2017). Assessment of upper tropospheric and stratospheric water vapor and ozone in reanalyses. *Atmospheric Chemistry and Physics*, 17, 12743-12778.
+
+**Atmospheric Correction:**
+
+- Rahman, H., Dedieu, G. (1994). SMAC: A simplified method for the atmospheric correction of satellite measurements in the solar spectrum. *International Journal of Remote Sensing*, 15, 123-143.
+- Vermote, E.F., et al. (1997). Second Simulation of the Satellite Signal in the Solar Spectrum (6S). *IEEE TGRS*, 35, 675-686.
+
+**Aerosol Climatology:**
+
+- Kinne, S., et al. (2006). An AeroCom initial assessment — optical properties in aerosol component modules of global models. *Atmospheric Chemistry and Physics*, 6, 1815-1834.
+
+**Surface Pressure:**
+
+- Van Besselaar, E.J.M., et al. (2011). A European daily high-resolution observational gridded data set of sea level pressure. *Journal of Geophysical Research*, 116, D11110.
+- Breon, F.-M., A. Vermeulen and J. Descloitres, An evaluation of satellite aerosol products against sunphotometer measurements, Remote Sensing of Environment, Volume 115, Issue 12, pp 3102-3111, 2011.
+- Buchard, V., et al. The MERRA-2 Aerosol Reanalysis, 1980 Onward. Part II: Evaluation and Case Studies. J. Climate, 30, 6851-6872, 2017.
+- Ramon D. and R. Santer, Operational remote sensing of aerosols over land to account for directional effects, Applied Optics-LP, 40, 3060-3075 (2001).
+- Randles, C.A., et al. The MERRA-2 Aerosol Reanalysis, 1980 Onward. Part I: System Description and Data Assimilation Evaluation. Journal of Climate 30:17, 6823-6850, 2017.
+
+**RTM and Spectroscopy:**
+
+- Schreier, F., et al. (2019) Py4CAtS — PYthon for Computational ATmospheric Spectroscopy. *Atmosphere*, 10, 262.
+- Gordon, I.E., et al. (2017) The HITRAN2016 molecular spectroscopic database. *J. Quant. Spectrosc. Radiat. Transfer* 203, 3-69.
+- Kochanov, R.V., et al. (2016). HITRAN Application Programming Interface (HAPI). *J. Quant. Spectrosc. Radiat. Transfer,* 177, 15-30.
+- Hess, M.; Koepke, P. & Schult, I, (1998). Optical Properties of Aerosols and Clouds: The Software Package OPAC. *Bulletin of the American Meteorological Society*, 79, 831-844.
+
+{{< pagebreak >}}
+
+# Appendix A: SMAC Coefficient Calculation
+
+## Spectral Response Functions and Gaseous Absorption
+
+Radiative transfer computations are done for all camera RSRFs (CENTER, LEFT, RIGHT). Typical atmospheric gaseous transmissions are computed for each Proba-V spectral band.
+
+## Processing Chain
+
+SMAC coefficients are derived from basic data through:
+
+1. **Spectroscopic data** (HITRAN 2012/2016) → Py4Cats/HAPI → line-by-line radiative transfer
+2. **Gaseous absorption regression** → SMAC coefficients for O₃ and H₂O transmission fits
+3. **ARTDECO RT simulations** → TOA reflectance for dense geometry/pressure/AOD sampling
+4. **Multi-dimensional polynomial fitting** → SMAC scattering coefficients
+5. **Fit accuracy validation** → RMSE vs 6S, neural network verification
+
+## Gaseous Absorption Modelling
+
+With the RSRF data, typical absorption is computed based on the HITRAN 2012/2016 database and Py4Cats/HAPI. Regression of gaseous transmission versus gas concentrations, air masses, and barometric pressure yields SMAC coefficients:
+
+$$T = \exp\left(a \cdot (m \cdot U_{H2O})^n\right)$$
+
+Where $m$ is the air mass and $U_{H2O}$ is the water vapor column.
+
+## Radiative Transfer Computations and Fit Accuracy
+
+Radiative transfer equation for each pixel (geometry, band, AOT, $P_{surf}$) is solved using ARTDECO RT package. TOA reflectance computations are done for a black surface and no gaseous absorption:
+
+- **RAA:** 121 values from 0 to 180°
+- **SZA:** 38 values from 0 to 89° (used only if <70°)
+- **VZA:** 47 values from 0 to 89° (used only if <70°)
+- **Surface pressure:** 6 values from 600 to 1050 hPa
+- **AOT at 550 nm:** 16 values from 0.01 to 1.5 (used only if < 0.8)
+
+Several multi-dimensional fits are performed to give the SMAC model parameters. Fit accuracy is validated against exact ARTDECO computations.
+
+## Fit Uncertainty Model (ONNX)
+
+A lightweight Feed-Forward Neural Network (MLP) in ONNX format estimates SMAC fit uncertainty.
+
+**Inputs:** Angles (SZA, VZA, RAA), AOD at 550 nm, pressure, TOC-r, iaer, TOA-r, wavelength
+
+**Performance:** Mean Square Error of 0.0097 on predicted RTM uncertainty on $R_{toc}$.
+
+**Runtime:** `onnxruntime.InferenceSession` loaded once per worker process.
+
+## BRDF Effect Estimation
+
+The baseline AC is run under the assumption of a Lambertian surface. If the surface BRDF shape is known, the RossThick-LiSparse-R model is used:
+
+$$\rho_g(\theta_s, \theta_v, \phi) = k_0 + k_1 F_1(\theta_s, \theta_v, \phi) + k_2 F_2(\theta_s, \theta_v, \phi) \qquad (25)$$
+
+The fast RTM with BRDF uses the 6S formulation with modified total atmospheric transmission $T_{atm,g}$ (Ramon and Santer, 2001). The 12 regression coefficients $d_i^k$ and $b_i^k$ for kernel directional averages are stored in the SMAC coefficient structure.
+
+# Appendix B: Aerosol Model Definitions
+
+## Aerosol Variability on Earth
+
+44,688 MERRA-2 grid points over land. Four dates represent seasonal variability: 2011/01/01, 2011/04/01, 2011/07/01, and 2011/10/01 at 13:00.
+
+Aerosol models are defined according to MERRA-2 5 AOT ratios:
+
+$$X_u = \frac{\tau_{a;u}^{550}}{\tau_a^{550}},\ u \in \{DU, SU, OC, BC, SS\}$$
+
+Each mixing ratio $X_u$ covers 0-100% range (except BC < 25%). From 5×5×5×5×6=3750 possible combinations, 148 combinations effectively occur on the 44,688 pixels of 2011/07/01.
+
+## Aerosol Optical Properties
+
+MERRA-2 aerosol components are mapped to OPAC models (RH=80%):
+
+| MERRA-2 Component | OPAC Model/Component |
+|-------------------|---------------------|
+| SU/SU | Antarctic model |
+| DU/DU | Desert model |
+| OC/OM | Water soluble (waso) |
+| SS/SS | Maritime clean |
+| BC/BC | Soot |
+
+: MERRA-2 to OPAC aerosol component mapping {#tbl-opac-mapping}
+
+**Spectral dependence:** $K(\lambda) = \sum_u K_u(\lambda) X_u$
+
+**Single scattering albedo:** $\varpi_0(\lambda) = \sum_u \varpi_0^u(\lambda) X_u$
+
+**Phase function:** $P(\theta,\lambda) = \sum_u P_u(\theta,\lambda) X_u$
+
+**Asymmetry parameter:** $g(\lambda) = \frac{1}{2} \int_{-1}^{1} \mu P(\mu,\lambda) d\mu$
+
+# Appendix C: SMAC-CL Implementation
+
+## Input Reading
+
+For each pixel, the following quantities are read from Level 1 files:
+
+- TOA radiance: `TOA-r(λ)`
+- Error: `DTOA-r(λ)`
+- Solar extra-terrestrial irradiance: `Es(λ)`
+- Geometry: SZA, SAA, VZA, VAA, VZA_SWIR, VAA_SWIR
+- Location: lat, lon
+
+Sensor name, date, and mean acquisition time (UTC) are stored as file attributes for SMAC coefficient and MERRA-2 file selection.
+
+## Pixel Masking
+
+Cloud-contaminated pixels are masked (`clm != 0`). Pixels with SZA > 90° are also excluded.
+
+## Spatial and Temporal Interpolation
+
+- **DEM:** Linear interpolation (improvement over nearest-neighbor in v1.0)
+- **MERRA-2:** `RegularGridInterpolator(method='linear')` — bilinear spatial + linear temporal
+- **AMIP:** Spatial interpolation only (monthly climatology, no temporal interpolation)
+
+**Unit conversions:**
+
+| Variable | MERRA-2 Unit | SMAC Unit | Conversion |
+|----------|-------------|-----------|------------|
+| $U_{O3}$ | Dobson | cm.atm | 1e-3 |
+| $U_{H2O}$ | kg.m⁻² | g.cm⁻² | 1e-1 |
+| $P_0$ | Pa | hPa | 1e-2 |
+
+: Unit conversions applied in SMAC-CL {#tbl-unit-conversions}
+
+Surface pressure $P_s$ and uncertainty $\Delta P_s$ are computed using Eqs. (21)-(24).
+
+## Aerosol Model Selection
+
+$$\text{iaero} = \text{argmin}_i \sum_u (X_u - X_{u,i})^2,\ i=0..147$$
+
+The $X_{u,i}$ basis for 148 predefined models is stored in `Aerosol_model_fraction.txt` and read once.
+
+## SMAC-CL Function
+
+**Architecture:**
+
+- Language: OpenCL (compatible with GPU and CPU)
+- Interface: Python wrapper (`smaccl` library)
+- Processing mode: Pixel-parallel (massively parallel on GPU)
+
+**Main Processing Function:**
+
+```python
+def smac_cl_run(
+    coeffs,           # SMAC coefficients (148 aerosol models)
+    tetas, tetav,     # SZA, VZA arrays
+    phis, phiv,       # SAA, VAA arrays
+    uh2o, uo3,        # Water vapor, ozone columns
+    taup550,          # AOD at 550 nm
+    pressure,         # Surface pressure
+    rtoa,             # TOA reflectance
+    k1p, k2p,         # BRDF kernel ratios (default 0 for Lambertian)
+    iaero_list        # List of aerosol model indices (11 models)
+):
+    """
+    Inputs: All arrays dimensioned [npixels] or [nbands, npixels]
+    Outputs:
+      - rtoc: TOC reflectance [nbands, npixels]
+      - jacobians: Sensitivity matrices
+      - u_ensemble: Std dev from aerosol ensemble
+    """
+```
+
+**Processing Flow:**
+
+```
+1. Reorganize input arrays for GPU efficiency (transpose, flatten, pad)
+2. Upload data to GPU/CPU memory
+   - TOA reflectances, geometry, auxiliary data
+   - SMAC coefficients (pre-loaded once)
+3. GPU/CPU kernel execution (per-pixel parallel)
+   a. Compute gaseous transmissions
+   b. Compute Rayleigh + aerosol scattering
+   c. Apply SMAC equations -> Rtoc
+   d. Compute analytical Jacobians
+   e. Finite-difference Jacobians (Ps, tau550)
+   f. 10 AMIP ensemble members
+4. Download results from GPU/CPU (Rtoc, Jacobians, ensemble statistics)
+5. CPU post-processing
+   - Combine uncertainty components
+   - Apply terrain corrections
+   - Quality flag assignment
+```
+
+**Performance:**
+
+- GPU acceleration: ~100× faster than CPU for large images
+- Memory requirement: ~2 GB GPU RAM for full-swath processing
+- Typical processing time: <1 second per tile (1000×1000 pixels)
+
+## Level 2A Output Variables
+
+| Output | Description | Dimensions | Dtype |
+|--------|-------------|------------|-------|
+| `rTOC` | TOC directional reflectance | (bands, height, width) | float32 |
+| `UrTOC` | Total uncertainty | (bands, height, width) | float32 |
+| `Jrtoa` | Jacobian vs Rtoa | (bands, height, width) | float32 |
+| `Juo3` | Jacobian vs UO3 | (bands, height, width) | float32 |
+| `Juh2o` | Jacobian vs UH2O | (bands, height, width) | float32 |
+| `Jpre` | Jacobian vs Ps | (bands, height, width) | float32 |
+| `Jtau550` | Jacobian vs AOD | (bands, height, width) | float32 |
+| `flag` | Quality flags | (height, width) | int16 |
+| `iaero` | Aerosol model index | (height, width) | int32 |
+| `TOTEXTTAU` | AOD 550 used | (height, width) | float32 |
+| `SZA`, `SAA`, `VZA`, `VAA` | Geometry | (height, width) | float32 |
+| `clm` | Cloud mask | (height, width) | uint8 |
+| `SM_MAP_B1..B4` | Status maps | (height, width) | uint8 |
+
+: Level 2A standard output variables {#tbl-l2a-outputs}
+
+**Diagnostic outputs (additional):**
+
+| Output | Description |
+|--------|-------------|
+| `unc_h2o` | H₂O uncertainty component |
+| `unc_o3` | O₃ uncertainty component |
+| `unc_ps` | Pressure uncertainty component |
+| `unc_aot` | AOD uncertainty component |
+| `slope_err` | Terrain slope error |
+| `urtoc_terrain` | Terrain uncertainty contribution |
+| `UrTOC_rtm_brdf` | BRDF uncertainty contribution |
+| `UrTOC_rtm_fit` | RTM fit uncertainty contribution |
+
+: Level 2A diagnostic output variables {#tbl-l2a-diagnostics}
+
+# Appendix D: Implementation Notes
+
+This appendix documents implementation-specific details, performance optimizations, and known limitations of the FDR4VGT production codebase. These are not changes to the scientific algorithm but rather engineering decisions for operational efficiency.
+
+## Performance Optimizations {#sec-perf-opt}
+
+### Ancillary Zarr Cache
+
+| Aspect | Description |
+|--------|-------------|
+| **What** | Pre-interpolates MERRA2 fields to full satellite grid once, stores in local Zarr cache |
+| **Why** | MERRA2 source files on network FS; per-tile interpolation re-reads network and repeats work |
+| **Function** | `precompute_ancillary()` in `process.py` |
+| **Toggle** | `[Sizes] anc_cache` (default on) |
+| **Numerical equivalence** | Pointwise interpolation → identical to per-tile interpolation (halo reads from cache) |
+| **Memory** | Streamed tile-by-tile to bound peak memory (~2.8 GB → safe on 4 GB nodes) |
+
+: Ancillary Zarr cache optimization {#tbl-zarr-cache}
+
+**Cache format:** Zarr format 2, most fields as float16 (small values, sufficient precision), `SLP` and `T10M` as float32 (overflow protection).
+
+### Tile-Based Processing
+
+| Aspect | Description |
+|--------|-------------|
+| **What** | Processes image in overlapping tiles (`batch_size` × `batch_size` with halo) |
+| **Why** | Bounded memory per tile, parallel processing with workers |
+| **Function** | `process_batched()` generates tile grid, `_worker_compute_tile()` processes each |
+| **Config** | `[Sizes] chunks_size` (default 512), `[Sizes] nworkers` (default 1) |
+| **Halo** | ±1 pixel halo for terrain slope/aspect computation (edge effects) |
+
+: Tile-based processing optimization {#tbl-tile-processing}
+
+### Local Output File
+
+| Aspect | Description |
+|--------|-------------|
+| **What** | Writes output NetCDF to local temp file, moves to final destination once at end |
+| **Why** | Serial per-tile append writes degrade on network FS (ceph) — 2s → 5s/tile |
+| **Function** | `process_batched()` creates temp file, `shutil.move()` at end |
+| **Toggle** | `[Sizes] local_output` (default on) |
+
+: Local output file optimization {#tbl-local-output}
+
+### Single NetCDF Handle
+
+| Aspect | Description |
+|--------|-------------|
+| **What** | Opens output NetCDF handle once, reuses for all tiles |
+| **Why** | Per-tile open/close/flush was dominant writer cost (HDF5 overhead) |
+| **Function** | `nc_out = Dataset(output_path, 'a')` reused across tiles |
+| **Flush** | Periodic close+reopen every `flush_interval` tiles to free HDF5 cache |
+
+: Single NetCDF handle optimization {#tbl-single-handle}
+
+### DEM Cropping
+
+| Aspect | Description |
+|--------|-------------|
+| **What** | Crops global GTOPO30 DEM to product's lat/lon extent before loading |
+| **Why** | Full DEM ~1.9 GB, cropped ~0.2 GB (narrow lon range) |
+| **Function** | `xrcrop(dem_ds, lat=data['y'], lon=data['x'])` |
+
+: DEM cropping optimization {#tbl-dem-cropping}
+
+### Copy-on-Write Shared State
+
+| Aspect | Description |
+|--------|-------------|
+| **What** | Pre-forks worker pool, then populates `_SHARED` dict (inherited via COW) |
+| **Why** | Avoids pickling large objects (SMAC coefficients, DEM, MERRA2) per task |
+| **Function** | `_SHARED.update()` before pool creation |
+| **Objects** | SMAC coefficients (~100 MB), aerosol model LUT, terrain data |
+
+: Copy-on-write shared state optimization {#tbl-cow-shared-state}
+
+## Data Type Requirements
+
+### Float32 for SLP/T10M (Overflow Fix)
+
+| Aspect | Description |
+|--------|-------------|
+| **Issue** | Ancillary Zarr cache stored `T10M` and `SLP` as float16 |
+| **Root cause** | `smaccl.c3s_lib.Ps()` computes `log(R*T)` where `R*T = 287.058 × 290 ≈ 83246` |
+| **Overflow** | 83246 exceeds float16 max (65504) → NaN in pressure correction → NaN rTOC |
+| **Fix** | `_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}` keeps these fields as float32 |
+| **Commit** | `51f7e68` — "Fix ancillary cache dtype overflow causing NaN rTOC" |
+
+: Float32 overflow fix for SLP/T10M {#tbl-float32-fix}
+
+**Validation:** Full processing run (100 tiles, 241.9s) shows rTOC finite on land ~77.2%, ocean ~0% (expected — ocean pixels masked by cloud/quality flags).
+
+### Float16 for Small-Value Fields
+
+Fields with small values (~0-0.1 range) are safely stored as float16:
+
+- `ERROR` (uncertainty components)
+- `TOTEXTTAU` (AOD values, typically <1.0)
+- Species fractions (0-1 range)
+
+These are widened to float32 on NetCDF write (netCDF4 has no native half-float type).
+
+## Known Limitations
+
+### Adjacency Effects
+
+**Status:** Not corrected.
+
+**Impact:** Significant for high-contrast scenes (coast, cloud edge, urban/rural boundaries). The SMAC algorithm assumes a horizontally homogeneous scene within the pixel footprint. Adjacent pixels with different reflectances contribute to the measured TOA radiance through atmospheric scattering, which is not accounted for.
+
+**Future work:** Implement semi-empirical adjacency correction (e.g., based on scene contrast and atmospheric conditions).
+
+### Köppen-Geiger Regionalization
+
+**Status:** Planned feature.
+
+**Description:** The AOD uncertainty model (Eq. 23) uses global multipliers. Regional multipliers based on Köppen-Geiger climate classification are defined but not yet implemented (see @tbl-kg-multipliers).
+
+**Data available:** `kg_zoneNumGueymard.csv` in ANCILLARY directory.
+
+### Water Vapor Uncertainty
+
+**Status:** Conservative 20% estimate.
+
+**Impact:** May overestimate total uncertainty in dry conditions.
+
+**Future work:** Refined characterization from MERRA-2 validation studies.
+
+## Tile Processing Architecture
+
+### Overview
+
+The processing pipeline uses a tile-based architecture for memory-bounded, parallel execution:
+
+```
+process_batched() -- Main entry point
+ 1. Generate tile grid from input extent
+    - Tile size: chunks_size x chunks_size
+    - Overlap: +/-1 pixel halo
+    - Total tiles: ceil(y/chunks) x ceil(x/chunks)
+ 2. Precompute ancillary cache (if enabled)
+    - Interpolate MERRA2 to full grid
+    - Save to local Zarr cache
+ 3. Create worker pool (nworkers)
+    - Fork workers before populating _SHARED
+    - COW inheritance of large objects
+ 4. Process tiles in parallel
+    - _worker_compute_tile() per tile
+    - SMAC-CL run (VNIR + SWIR)
+    - Uncertainty propagation
+    - Write tile to NetCDF
+ 5. Move local output to final destination
+```
+
+### Worker Function
+
+`_worker_compute_tile()` performs end-to-end tile computation:
+
+1. **Read tile data** from input L1C and ancillary cache
+2. **Interpolate DEM** and compute terrain (slope/aspect)
+3. **Select aerosol model** (closest in 5D species space)
+4. **Run SMAC-CL** (VNIR bands, then SWIR band)
+5. **Compute BRDF effect** (Lambertian vs BRDF run, if enabled)
+6. **Compute terrain effect** (CESBIO model)
+7. **Compute RTM fit uncertainty** (ONNX model)
+8. **Propagate uncertainties** (`compute_urtoc()`)
+9. **Build quality flags** (`build_flag()`)
+10. **Write tile** to output NetCDF
+
+## Output Format Details
+
+### NetCDF Structure
+
+The output NetCDF file follows CF-1.8 conventions with attributes from `cf_attributes_res2.json`.
+
+**Dimensions:**
+
+| Dimension | Size | Description |
+|-----------|------|-------------|
+| `bands` | 4 | B1 (Blue), B2 (Red), B3 (NIR), B4 (SWIR) |
+| `height` | Variable | Tile height (y dimension) |
+| `width` | Variable | Tile width (x dimension) |
+
+: Output NetCDF dimensions {#tbl-nc-dimensions}
+
+**Global attributes:**
+
+| Attribute | Description |
+|-----------|-------------|
+| `sensor` | Sensor name (Proba-V, SPOT-VGT) |
+| `date` | Acquisition date |
+| `time` | Mean acquisition time (UTC) |
+| `projection` | Projection attributes from input L1C |
+| `conventions` | CF-1.8 |
+| `history` | Processing timestamp and version |
+
+: Output NetCDF global attributes {#tbl-nc-global-attrs}
+
+**Variable attributes:** Each variable has `standard_name`, `units`, `long_name`, and `comments` attributes applied from the CF JSON configuration.
+
+### Chunk Cache Optimization
+
+The output NetCDF is written with optimized chunk sizes matching the tile processing grid, ensuring efficient random access for downstream consumers.
+
+# Appendix E: SMACCL OpenCL Kernel API
+
+This appendix documents the SMACCL OpenCL function API as implemented in the HYGEOS `smaccl` repository (OpenCL branch), including both:
+
+- Python host wrapper API (`smaccl/smaccl.py`, class `Smaccl`)
+- OpenCL kernel API (`smaccl/devicecl.cl`, kernel `smaccl`)
+
+The objective is to provide a precise implementation-facing contract for integration and maintenance.
+
+## Python Host API
+
+### Signature
+
+```python
+def run(
+    self,
+    coeffs,
+    tetas,
+    tetav,
+    phis,
+    phiv,
+    uh2o,
+    uo3,
+    taup550,
+    pression,
+    rtoa,
+    k1p,
+    k2p,
+    iaero,
+    NBLOOP=1,
+)
+```
+
+### Returned tuple
+
+```python
+(rsurf, rsurf_0, dev_std, Jrtoa, Juo3, Juh2o, Jpre, Jtaup)
+```
+
+All returned arrays are `float32` and shaped like `rtoa`.
+
+### Input semantics
+
+- `coeffs`: SMAC coefficients. First dimension defines number of spectral bands processed.
+- `tetas`: solar zenith angle (SZA), float32.
+- `tetav`: view zenith angle (VZA), float32.
+- `phis`: solar azimuth angle (SAA), float32.
+- `phiv`: view azimuth angle (VAA), float32.
+- `uh2o`: total water vapor column, float32.
+- `uo3`: total ozone column, float32.
+- `taup550`: aerosol optical depth at 550 nm, float32.
+- `pression`: surface pressure, float32.
+- `rtoa`: TOA reflectance, float32.
+- `k1p`, `k2p`: BRDF normalized kernel ratios. Set to 0 for Lambertian processing.
+- `iaero`: aerosol model indices per pixel, with `Naero` candidates.
+- `NBLOOP`: number of internal per-thread loops (used for repeated runs/MC patterns).
+
+### Shape contract
+
+The wrapper supports 4D tensor layout for tiled processing:
+
+- `rtoa`: `(NBAND, NZ, XBLOCK, XGRID)`
+- Angular and ancillary scalar fields (`tetas`, `tetav`, `phis`, `phiv`, `uh2o`, `uo3`, `taup550`, `pression`): `(NZ, XBLOCK, XGRID)`
+- BRDF fields (`k1p`, `k2p`): `(NBAND, NZ, XBLOCK, XGRID)`
+- Aerosol index tensor (`iaero`): `(Naero, NZ, XBLOCK, XGRID)`
+
+Where:
+
+- `NBAND`: number of spectral bands handled in current call
+- `NZ`: padded depth along pixel index dimension
+- `XBLOCK`, `XGRID`: OpenCL launch decomposition
+- `Naero`: number of aerosol candidates used in ensemble/selection
+
+### Runtime behavior
+
+1. Allocate output buffers for `rsurf`, `rsurf_0`, `dev_std`, Jacobians.
+2. Copy host arrays to OpenCL buffers.
+3. Launch OpenCL kernel `smaccl`.
+4. Copy outputs from device to host arrays.
+
+## OpenCL Kernel API
+
+### Signature
+
+```c
+__kernel void smaccl(
+    __global coef_atmos *ca,
+    __global float *tetas_,
+    __global float *tetav_,
+    __global float *phis_,
+    __global float *phiv_,
+    __global float *uh2o_,
+    __global float *uo3_,
+    __global float *taup550_,
+    __global float *pression_,
+    __global float *rtoa_,
+    __global float *rsurf,
+    __global float *Jr,
+    __global float *Juo3,
+    __global float *Juh2o,
+    __global float *Jpre,
+    __global float *Jtaup,
+    __global float *k1p_,
+    __global float *k2p_,
+    __global int *iaero,
+    int NMOD,
+    int NBLOOPd,
+    int NBANDd,
+    int NZd
+)
+```
+
+### Kernel-level constants and finite differences
+
+The implementation uses:
+
+- `dpre = 10.0` hPa for pressure Jacobian finite difference
+- `dtau_rel = 0.1` for relative AOD perturbation
+- `NRUN = 3 + NBLOOPd`
+
+Interpretation of `NRUN`:
+
+- 1 reference run
+- 2 perturbation runs for finite-difference Jacobians (`P_s`, `tau550`)
+- `NBLOOPd` optional additional looped runs
+
+## Output Mapping
+
+The host API output tuple maps to AC physics as:
+
+| Host variable | Physical meaning |
+|---------------|-------------------|
+| `rsurf` | TOC directional reflectance (`rTOC`) |
+| `rsurf_0` | Lambertian-equivalent TOC reflectance (`rTOC_0`) |
+| `dev_std` | Aerosol-model ensemble spread (`UrTOC_ens`) |
+| `Jrtoa` | Jacobian $\partial R_{toc}/\partial R_{toa}$ |
+| `Juo3` | Jacobian $\partial R_{toc}/\partial U_{O3}$ |
+| `Juh2o` | Jacobian $\partial R_{toc}/\partial U_{H2O}$ |
+| `Jpre` | Jacobian $\partial R_{toc}/\partial P_s$ |
+| `Jtaup` | Jacobian $\partial R_{toc}/\partial \tau_{550}$ |
+
+: SMACCL kernel output variable mapping {#tbl-kernel-output-mapping}
+
+## ISmaccl Wrapper API
+
+The integration layer `ISmaccl` wraps the kernel API for product-level execution.
+
+### Constructor
+
+```python
+ISmaccl(
+    config,
+    frac_aer_model,
+    ca,
+    XBLOCK=128,
+    XGRID=128,
+    breakpoint=False,
+    ancillary=False,
+    platform=...,  # forwarded to Smaccl(platform=...)
+)
+```
+
+### Product-level methods
+
+- `run_block(l2_data, batch_size=512)`: block mapping over xarray/dask chunks.
+- `run(l2_data, iaero)`: scene/tile execution and assembly of xarray output dataset.
+- `exec_smaccl(...)`: low-level preparation/padding/reshaping, kernel call, post-mapping.
+
+### `exec_smaccl` returned tuple
+
+```python
+(
+    rsurf,
+    rsurf0,
+    dev_std,
+    Juh2o,
+    Juo3,
+    Jrtoa,
+    Jpre,
+    Jtaup,
+    Duh2o,
+    Duo3,
+    Drtoa,
+    Dpre,
+    Dtaup,
+)
+```
+
+This extends kernel outputs by including uncertainty-input terms (`D*`) computed on host side for subsequent propagation.
+
+### Band handling in Proba-V mode
+
+For Proba-V processing, the wrapper executes two calls:
+
+1. VIS/NIR group using `VZA`/`VAA`
+2. SWIR group using `VZA_IR`/`VAA_IR`
+
+Then it merges outputs into full 4-band products.
+
+## Device and Data Contracts
+
+### Data type and ordering requirements
+
+- Arrays converted to C-order contiguous layout
+- Floating inputs cast to `float32`
+- Aerosol index array cast to integer (`int16`/`int32` depending stage)
+- Invalid geolocation values sanitized before kernel packing
+- Padded extended arrays (`GSIZEXT`) filled with NaN then reshaped to launch geometry
+
+### Device and queue selection
+
+`Smaccl.__init__` compiles kernel source and creates queue/context via `set_queue(xpu, environment)`.
+
+Supported environment mapping in repository implementation includes:
+
+| Environment | CPU device name | GPU device name |
+|-------------|-----------------|------------------|
+| `Default` | Portable Computing Language | NVIDIA CUDA |
+| `Turenne` | Intel(R) OpenCL | — |
+| `TerraScope` | Intel(R) OpenCL | NVIDIA CUDA |
+
+: OpenCL device/environment mapping {#tbl-device-mapping}
+
+If no compatible/available device is found, initialization fails.
+
+### Contractual outputs for FDR4VGT
+
+For this ATBD implementation, the contractual kernel-facing outputs are:
+
+- Reflectance: `rTOC`, `rTOC_0`
+- Jacobians: `Jrtoa`, `Juo3`, `Juh2o`, `Jpre`, `Jtau550`
+- Aerosol spread: `UrTOC_ens`
+
+Host-side uncertainty terms (`Duh2o`, `Duo3`, `Drtoa`, `Dpre`, `Dtaup`) are combined with Jacobians in the uncertainty propagation equation documented in the Uncertainty Analysis section.
+
+This appendix defines the implementation API used by the operational chain and should be updated if the upstream HYGEOS `smaccl` API changes.

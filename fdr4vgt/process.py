@@ -732,16 +732,27 @@ def process(configfile):
     dask.config.set(scheduler='synchronous') 
 #    chunks = 256
     config_ = readConfig(configfile)
+    # Use consistent naming for AOD thresholds.
+    # Primary names: aodmax, aodmax_grad.
+    # Legacy aliases accepted: aotmax, aod_max_grad, taot.
+    if 'aodmax' not in config_:
+        config_['aodmax'] = config_.get('aotmax', config_.get('taot', 0.6))
+    if 'aodmax_grad' not in config_:
+        config_['aodmax_grad'] = config_.get('aod_max_grad', 1.4e-4)
+    # SMACCL still expects taot for its internal high-AOD process flag.
+    config_['taot'] = float(config_['aodmax'])
     config.set('amip_path', config_['amip_path'])
     _coef_path = Path(config_['smaccoef_dir']) / f"{config_['sensor']}_smac_coeffs_v3.0.npy"
     config.set('aerosol_model_fraction', config_['faer'])
     config.set('dem_path', config_['dem'])
     config.set('kept_data_path', config_['kept_data_path'])
-    config.set('aotmax', config_['aotmax'])
+    config.set('aodmax', config_['aodmax'])
+    config.set('aotmax', config_['aodmax'])
     config.set('tocmin', config_['tocmin'])
     config.set('tocmax', config_['tocmax'])
     config.set('szamax', config_['szamax'])
-    config.set('aod_max_grad', config_['aod_max_grad'])
+    config.set('aodmax_grad', config_['aodmax_grad'])
+    config.set('aod_max_grad', config_['aodmax_grad'])
 
     # Optional uncertainty switches / parameters.
     config_.setdefault('enable_brdf_uncertainty', True)

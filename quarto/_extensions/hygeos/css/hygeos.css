@@ -1,0 +1,82 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap');
+
+/* Set Quicksand font */
+.reveal {
+  font-family: 'Quicksand', sans-serif !important;
+}
+
+.reveal .footer {
+  font-size: 0.5em;
+  color: #ff0000;
+  text-align: center; /* Centers the footer instead of left-aligning */
+}
+
+/* Reset reveal margins */
+.reveal .slides {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  left: 0 !important; 
+  top: 0 !important;
+  transform: none !important; /* Disable reveal's auto-scaling */
+}
+
+.reveal section {
+  padding: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important; 
+  text-align: left; 
+}
+
+/* Center title slide content */
+.reveal section#title-slide {
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+.reveal section#title-slide h1 {
+  font-family: 'Quicksand', sans-serif !important;
+}
+
+/* Full-width headers */
+.reveal section:not(#title-slide) h1, .reveal section:not(#title-slide) h2 {
+  margin: 0 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  background-color: #2c3e50 !important;
+  color: white !important;
+  padding: 15px 20px !important;
+  text-align: center !important; 
+  position: absolute !important;
+  top: 30px !important;
+  font-family: 'Quicksand', sans-serif !important;
+}
+
+.reveal section:not(#title-slide) {
+  background: url('../resources/assets/bandeau_4couleurs.png') no-repeat top center;
+  background-size: contain;
+  padding-top: 100px !important;
+  position: absolute;
+}
+
+/* Standard slide padding for regular content */
+.reveal section > *:not(h1):not(h2) {
+  padding: 120px 60px 20px !important; 
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Remove default reveal centering for specific elements */
+.reveal ul, .reveal ol, .reveal p {
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}

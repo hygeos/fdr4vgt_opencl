@@ -1,0 +1,60 @@
+[project]
+name = "fdr4vgt"
+requires-python = ">= 0.1"
+version = "0.1.0"
+authors = [{name = "HYGEOS", email = "contact@hygeos.com"}]
+dependencies = ['xarray',
+                'netcdf4',
+                'dask',
+                "core @ git+https://github.com/hygeos/core.git#a51bc9dbe7f74fe1e280d21571e8018dc65abb6b",
+                "smaccl @ git+https://github.com/hygeos/smaccl.git@opencl", "vulture",
+#                "harp @ git+https://github.com/hygeos/harp.git",
+                ]
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["fdr4vgt"]  # only install this folder
+
+[tool.pixi.project]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+fdr4vgt = { path = ".", editable = true }
+#smaccl = { path = "/mnt/qnaphome/bruno/Projets/smaccl", editable = true }
+#smaccl = { path = "/home/bruno/Projets/smaccl", editable = true }
+#smac-neo = {path = "/mnt/qnaphome/bruno/Projets/smac-neo", editable = true }
+#smaccl = { git = "git+https://github.com:hygeos/smaccl.git", branch="opencl" }
+
+[tool.pixi.environments]
+default = { features = ['sys', 'sub', 'dev'], solve-group = "default" }
+
+[tool.pixi.tasks]
+tests = "pytest tests/"
+
+
+[tool.pixi.dependencies]
+pytest = "*"
+pytest-html = "*"
+matplotlib-base = "*"
+pytest-xdist = "*"
+xarray = "*"
+numpy = ">=2"
+pyopencl = '*'
+pocl = '*'
+jax = '*'
+psutil = '*'
+xdem = "0.1.5.*"
+config = '*'
+ONNXRuntime = '*'
+zarr = "*"
+vulture = "*"
+
+
+[tool.pixi.feature.sys.dependencies]
+
+[tool.pixi.feature.dev.dependencies]
+
+[tool.pixi.feature.sub.dependencies]

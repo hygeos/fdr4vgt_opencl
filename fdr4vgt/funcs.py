@@ -63,14 +63,16 @@ def shift_lon_to_360(ds, lon_sat):
 
 def build_flag(ds_input, ds_output, config_data):
 #    flag_aot = ds_input.rtoa.max(dim="bands") >= config_data.getfloat("Coefficients", "aotmax")
-    flag_aot = np.max(ds_input['TOA'], axis=0) >= config_data.getfloat("aotmax")
+    aodmax = config_data.__dict__.get('aodmax', config_data.__dict__.get('aotmax'))
+    aodmax_grad = config_data.__dict__.get('aodmax_grad', config_data.__dict__.get('aod_max_grad'))
+    flag_aot = np.max(ds_input['TOA'], axis=0) >= float(aodmax)
 #    flag_toc_min = ds_output.rtoc_run.min(dim="bands") < config_data.getfloat("Coefficients", "tocmin")
     _flag_toc_min = np.min(ds_output['rTOC'], axis=0) < config_data.getfloat("tocmin")
 #    flag_toc_max = ds_output.rtoc_run.max(dim="bands") > config_data.getfloat("Coefficients", "tocmax")
     _flag_toc_max = np.max(ds_output['rTOC'], axis=0) > config_data.getfloat("tocmax")
 #    flag_sza_max = ds_input.tetas > config_data.getfloat("Coefficients", "szamax")
     flag_sza_max = ds_input['SZA'] > config_data.getfloat("szamax")
-    flag_aot_grad = ds_output['aod_grad'] > config_data.getfloat("aod_max_grad")
+    flag_aot_grad = ds_output['aod_grad'] > float(aodmax_grad)
     flag_cloud = ds_input['clm'] != 0 # cloud contaminated flag
 #    flag = ((flag_aot.data.astype(np.int16) << 0) | #lsb
 #            (flag_toc_min.data.astype(np.int16) << 1) |
@@ -770,8 +772,10 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
 
         # Calculate error
         # Precompute denominator components
-        # When surface faces away from sun (mui < 0), direct term contributes nothing
-        term1 = np.where(mui > 0, Tdir * mui / mus, 0.0)
+        # When surface faces away from sun (mui <= 0), direct term contributes
+        # nothing. We also clamp to >= 0 for numerical robustness.
+        direct_raw = np.where(mui > 0, Tdir * mui / mus, 0.0)
+        term1 = np.maximum(direct_raw, 0.0)
 
         term2 = Tdif * fsky
 

@@ -1,0 +1,17 @@
+title: Hygeos Quarto templates
+authors:
+  - name: François Steinmetz
+version: 0.1.0
+quarto-version: ">= 1.4.0"
+contributes:
+  formats:
+    pptx:
+      reference-doc: _extensions/hygeos/resources/templates/template_PowerPoint_HYGEOS_v2.1.pptx
+    revealjs:
+      based-on: revealjs
+      css: css/hygeos.css
+    beamer:
+      include-in-header:
+        text: |
+          \usepackage{_extensions/hygeos/resources/templates/beamerthemeHYGEOS}
+          \graphicspath{{_extensions/hygeos/resources/imgs/}}

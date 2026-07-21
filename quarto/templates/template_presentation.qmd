@@ -1,0 +1,13 @@
+---
+title: "Titre de la présentation"
+author: Auteur
+institute: "![](_extensions/hygeos/resources/imgs/logo-Hygeos.png){height=120px}"
+format: # pptx, revealjs, hygeos-pptx...
+    revealjs
+---
+
+## Titre
+
+- Élement 1
+- Élement 2
+

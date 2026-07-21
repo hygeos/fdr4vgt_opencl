@@ -1,0 +1,60 @@
+---
+title: "Titre du rapport"
+subtitle: "Sous-titre du rapport"
+version: edition.revision
+reference: ref
+client: XXXXX
+contrat: XXX
+date: today
+author:
+  - "Jean Dupont"
+
+format:
+  pdf:
+    pdf-engine: xelatex
+    template: _extensions/hygeos/resources/templates/hygeos-template.tex
+
+toc: true
+number-sections: true
+bibliography: references.bib
+fontsize: 11pt
+---
+
+<!-- Ajout d'une table des matières -->
+
+\tableofcontents
+{{< pagebreak >}}
+
+<!-- Ajout d'une table des figures et des tableaux -->
+
+\listoffigures
+\listoftables
+{{< pagebreak >}}
+
+# Introduction
+
+Ce document a été produit à l'aide de Quarto [@allaire2022].
+
+# Résultats
+
+Theorème de Pythagore: 
+$$
+a^2 + b^2 = c^2
+$$
+
+| Modèles | Performances | 
+|---|---|
+| Modèle 1 | Bonne |
+| Modèle 1 | Bonne |
+: Résumé des performances
+
+## Analyse
+
+Du contenu
+
+{{< pagebreak >}}
+
+# Bibliographie
+
+::: {#refs}
+:::

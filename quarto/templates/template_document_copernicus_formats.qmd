@@ -1,0 +1,40 @@
+---
+title: "Document Template (Copernicus Formats)"
+author: "Copernicus Team"
+format:
+  html:
+    css: ../_extensions/copernicus/css/copernicus-docs.css
+  docx:
+    reference-doc: ../../FDR4VGT-AC-ATBD_v1.0.docx
+table-of-contents: true
+number-sections: true
+---
+
+# Introduction
+
+This template is a compatibility fallback for environments where custom format
+IDs are not available, while still using assets from the local Copernicus
+extension.
+
+## Figure Example
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 2 * np.pi, 200)
+y = np.cos(x)
+
+fig, ax = plt.subplots(figsize=(7, 3))
+ax.plot(x, y, color="#003399", linewidth=2)
+ax.set_title("Example plot (custom format)")
+ax.set_xlabel("x")
+ax.set_ylabel("cos(x)")
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
+
+# References
+
+Add references here if needed.

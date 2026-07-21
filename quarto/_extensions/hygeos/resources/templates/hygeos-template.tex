@@ -1,0 +1,293 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{refcount}
+\usepackage{caption}
+\usepackage{graphicx}
+\usepackage{calc}
+\usepackage{eso-pic}
+\usepackage{changepage}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usepackage{float}
+
+% ------------------------------------------------
+% Underline spans (from Pandoc's [text]{.underline})
+% ------------------------------------------------
+\providecommand{\ul}[1]{\underline{#1}}
+
+% ------------------------------------------------
+% Fonts
+% ------------------------------------------------
+% Pour un rendu fidèle au template Word, compiler avec XeLaTeX/LuaLaTeX
+% et décommenter les lignes suivantes :
+% \usepackage{fontspec}
+% \setmainfont{Calibri}
+% \usepackage[T1]{fontenc} % à retirer avec fontspec
+
+% ------------------------------------------------
+% Couleurs HYGEOS (issues du template Word)
+% ------------------------------------------------
+\definecolor{HygeosDarkBlue}{HTML}{233165}
+\definecolor{HygeosBlue}{HTML}{4596D2}
+\definecolor{HygeosLightBlue}{HTML}{E5F4FD}
+\definecolor{HygeosGreen}{HTML}{95C35B}
+\definecolor{HygeosOrange}{HTML}{F6A500}
+\definecolor{HygeosLightBg}{HTML}{E5F4FD}
+\definecolor{HygeosGray}{HTML}{666666}
+
+% ------------------------------------------------
+% Interligne (~1.3 comme dans le template Word)
+% ------------------------------------------------
+\setstretch{1.3}
+
+% ------------------------------------------------
+% Numérotation des sections (1., 1.1, 1.1.1)
+% ------------------------------------------------
+\renewcommand{\thesection}{\arabic{section}.}
+\renewcommand{\thesubsection}{\thesection\arabic{subsection}}
+\renewcommand{\thesubsubsection}{\thesubsection.\arabic{subsubsection}}
+
+% ------------------------------------------------
+% Titres (tailles et styles du template Word)
+% ------------------------------------------------
+% Titre principal : Calibri Bold Small Caps 22pt, centré
+\titleformat{\title}
+  {\centering\Huge\bfseries\scshape\color{HygeosDarkBlue}}
+  {}{0pt}{}
+
+% Section (Titre1) : Calibri Bold 20pt, saut de page avant
+\titleformat{\section}[block]
+  {\huge\bfseries\color{HygeosDarkBlue}}
+  {\thesection}{0.5em}{}
+  [\vspace{6pt}]
+
+% Sous-section (Titre2) : Calibri Bold Small Caps 18pt
+\titleformat{\subsection}
+  {\Large\bfseries\scshape\color{HygeosDarkBlue}}
+  {\thesubsection}{0.8em}{}
+
+% Sous-sous-section (Titre3) : Calibri Bold 16pt
+\titleformat{\subsubsection}
+  {\large\bfseries\color{HygeosDarkBlue}}
+  {\thesubsubsection}{0.8em}{}
+
+% Espacement avant/après les titres
+\titlespacing{\section}{0pt}{12pt}{6pt}
+\titlespacing{\subsection}{0pt}{8pt}{6pt}
+\titlespacing{\subsubsection}{0pt}{6pt}{6pt}
+
+% ------------------------------------------------
+% Corps du texte : justifié, espacement après 6pt
+% ------------------------------------------------
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+% ------------------------------------------------
+% Marges réduites
+% ------------------------------------------------
+\usepackage[includeheadfoot, top=1.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+
+% ------------------------------------------------
+% Header / Footer
+% ------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+
+% En-tête : logo à gauche + rectangle bleu foncé à droite (date + version)
+\fancyhead[L]{}
+\fancyhead[C]{}
+\fancyhead[R]{%
+  \begin{tikzpicture}[remember picture, overlay]
+    % Rectangle bleu foncé qui occupe toute la partie droite du header
+    \fill[HygeosDarkBlue] (current page.north east) rectangle ++(-\paperwidth, -0.06\paperheight);
+    % Texte centré dans le rectangle
+    \path (current page.north east) ++(-0.25\paperwidth, -0.03\paperheight)
+      node[anchor=center, text=white, font=\footnotesize, align=center] {%
+        \begin{tabular}{@{\hspace{8pt}}ll@{\hspace{8pt}}}
+          Date : & $date$ \\
+          Version : & $version$
+        \end{tabular}%
+      };
+    % Logo à gauche, intégré dans le header
+    \IfFileExists{_extensions/hygeos/resources/imgs/hygeos-header-logo.png}{%
+      \path (current page.north west) ++(2cm, -0.03\paperheight)
+        node[anchor=west] {\includegraphics[height=1.2cm]{_extensions/hygeos/resources/imgs/hygeos-header-logo.png}};
+    }{}
+  \end{tikzpicture}%
+}
+
+% Pied de page : texte blanc sur fond bleu foncé (dessiné dans le tikzpicture du footer)
+\fancyfoot[L]{}
+\fancyfoot[C]{}
+\fancyfoot[R]{}
+
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ------------------------------------------------
+% Footer : rectangle bleu foncé + 4 segments HYGEOS natifs
+% ------------------------------------------------
+\newcommand{\hygeosfooterband}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    % Rectangle bleu foncé plein pied - en bas de page
+    \fill[HygeosDarkBlue] (current page.south west) rectangle ++(\paperwidth, 1.8cm);
+    % 4 segments HYGEOS (bleu, vert, orange, bleu nuit) - juste au-dessus
+    \fill[HygeosLightBlue] (current page.south west) ++(0, 1.8cm) rectangle ++(0.25\paperwidth, 0.3cm);
+    \fill[HygeosBlue] (current page.south west) ++(0.25\paperwidth, 1.8cm) rectangle ++(0.25\paperwidth, 0.3cm);
+    \fill[HygeosOrange] (current page.south west) ++(0.5\paperwidth, 1.8cm) rectangle ++(0.25\paperwidth, 0.3cm);
+    \fill[HygeosGreen] (current page.south west) ++(0.75\paperwidth, 1.8cm) rectangle ++(0.25\paperwidth, 0.3cm);
+    % Texte dans le rectangle bleu foncé
+    \path (current page.south west) ++(1.5cm, 1.2cm) node[anchor=west, text=white, font=\footnotesize] {Reference : $reference$};
+    \path (current page.south east) ++(-1.5cm, 1.2cm) node[anchor=east, text=white, font=\footnotesize] {\the\numexpr\thepage\relax\ / \getpagerefnumber{LastPage}};
+    \path (current page.south east) ++(-1.2cm, 0.3cm) node[anchor=east, text=white, font=\footnotesize] {Ce document est la propriété de HYGEOS. Il ne peut être ni reproduit, ni communiqué sans autorisation écrite préalable.};
+  \end{tikzpicture}%
+}
+\AddToShipoutPicture{\hygeosfooterband}
+
+% ------------------------------------------------
+% CSL References (required for Quarto bibliography)
+% ------------------------------------------------
+% Quarto generates \bibitem[\citeproctext]{...} where \citeproctext expands to
+% nothing, yielding \bibitem[]{...} → empty label "[]".
+% Keep \citeproctext defined (empty) as Quarto expects it.
+\newcommand{\citeproctext}{}
+% Redefine \bibitem to ignore the (empty) optional label and let LaTeX
+% auto-number references as [1], [2], …
+\let\standardbibitem\bibitem
+\renewcommand{\bibitem}[2][]{%
+  \standardbibitem{#2}%
+}
+% CSLReferences is called with two arguments by Quarto: \begin{CSLReferences}{1}{1}
+\newenvironment{CSLReferences}[2]{%
+  \begin{thebibliography}{#1}%
+}{%
+  \end{thebibliography}%
+}
+
+% ------------------------------------------------
+% Hyperlinks
+% ------------------------------------------------
+\hypersetup{
+  colorlinks=true,
+  linkcolor=HygeosDarkBlue,
+  urlcolor=HygeosBlue,
+  citecolor=HygeosDarkBlue
+}
+
+% ------------------------------------------------
+% Captions (Légende : italique 10pt, centré)
+% ------------------------------------------------
+\captionsetup{
+  labelfont={bf,color=HygeosDarkBlue},
+  textfont={it,small},
+  position=bottom,
+  justification=centering
+}
+% Extra spacing below table captions only
+\captionsetup[table]{belowskip=10pt}
+
+% ------------------------------------------------
+% Page de garde (style template Word HYGEOS)
+% ------------------------------------------------
+\makeatletter
+$if(subtitle)$
+\newcommand{\@subtitle}{$subtitle$}
+$endif$
+\renewcommand{\maketitle}{
+  \begin{titlepage}
+    \vspace*{1cm}
+    
+    % Logo HYGEOS 
+    \begin{center}
+      \IfFileExists{_extensions/hygeos/resources/imgs/logo-Hygeos.png}{%
+        \includegraphics[height=3cm]{_extensions/hygeos/resources/imgs/logo-Hygeos.png}%
+      }{}
+      \vspace{2cm}
+      
+      % Titre en petites majuscules
+      {\fontsize{28pt}{32pt}\selectfont\bfseries\scshape\color{HygeosDarkBlue}\@title\par}
+      $if(subtitle)$
+      \vspace{0.8cm}
+      {\fontsize{18pt}{22pt}\selectfont\textcolor{HygeosGray}{\@subtitle}\par}
+      $endif$
+      \vspace{3cm}
+      
+      % Métadonnées du document (comme dans le template Word)
+      \renewcommand{\arraystretch}{1.5}
+      \begin{tabular}{@{}ll@{}}
+        \textcolor{HygeosGray}{\textbf{Référence :}} & \textcolor{HygeosDarkBlue}{\textbf{$reference$}} \\
+        \textcolor{HygeosGray}{\textbf{Date :}} & \textcolor{HygeosDarkBlue}{\textbf{\@date}} \\
+        \textcolor{HygeosGray}{\textbf{Version :}} & \textcolor{HygeosDarkBlue}{\textbf{$version$}} \\
+        \textcolor{HygeosGray}{\textbf{Numéro de contrat :}} & \textcolor{HygeosDarkBlue}{\textbf{$contrat$}} \\
+        \textcolor{HygeosGray}{\textbf{Nom du client :}} & \textcolor{HygeosDarkBlue}{\textbf{$client$}} \\
+      \end{tabular}
+      \renewcommand{\arraystretch}{1}
+    \end{center}
+    
+    \vfill
+  
+  \end{titlepage}
+}
+\makeatother
+
+% ------------------------------------------------
+% Pandoc compatibility
+% ------------------------------------------------
+\newcommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\newcommand{\pandocbounded}[1]{#1}
+\newcounter{none}
+
+$if(highlighting-macros)$
+$highlighting-macros$
+$endif$
+
+$if(tables)$
+\usepackage{longtable,booktabs,array}
+$endif$
+
+$if(graphics)$
+$endif$
+
+$if(links-as-notes)$
+\renewcommand{\href}[2]{#2\footnote{\url{#1}}}
+$endif$
+
+$if(title)$
+\title{\textcolor{HygeosDarkBlue}{$title$}}
+$endif$
+
+$if(author)$
+\author{$for(author)$$author$$sep$ \\ $endfor$}
+$endif$
+
+$if(date)$
+\date{$date$}
+$endif$
+
+% CSL compatibility fix
+\newcommand{\CSLLeftMargin}[2]{#2}
+\newcommand{\CSLRightInline}[1]{#1}
+\newcommand{\CSLBlock}[1]{#1}
+
+\begin{document}
+
+$if(title)$
+\maketitle
+\thispagestyle{fancy}
+$endif$
+
+$body$
+
+\end{document}

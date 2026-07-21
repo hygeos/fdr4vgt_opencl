@@ -1,0 +1,57 @@
+---
+title: "Titre de la présentation"
+author: Auteur
+# institute: "![](_extensions/hygeos/resources/assets/logo-Hygeos.png){height=120px}"
+format: # pdf, docx, html, hygeos-docx, hygeos-pdf
+    html
+table-of-contents: true
+number-sections: true
+bibliography: references.bib
+---
+
+# Titre 1
+
+Ce document a été produit à l'aide de Quarto [@allaire2022].
+
+## Figures
+
+![Exemple OLCI](https://developers.google.com/earth-engine/datasets/images/COPERNICUS/COPERNICUS_S3_OLCI_sample.png){#fig-olci}
+
+Un exemple d'image OLCI est présenté en @fig-olci.
+
+```{python}
+#| output: asis
+#| echo: false
+
+from _extensions.hygeos.utils import display_figure, display_markdown
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Sample data categories
+categories = ["Alpha", "Beta", "Gamma"]
+
+for cat in categories:
+    # 1. Generate the Markdown Header
+    display_markdown(f"## Figure {cat}")
+    display_markdown(
+        f'Cette figure (voir @fig-{cat}) illustre le cas "{cat}"'
+    )
+
+    # 2. Create the Plot
+    fig, ax = plt.subplots()
+    x = np.linspace(0, 10, 100)
+    y = np.sin(x * (categories.index(cat) + 1))
+    ax.plot(x, y)
+    ax.grid(True)
+
+    display_figure(
+        legend=f'Figure "{cat}".',
+        label=f"#fig-{cat}",
+    )
+```
+
+# References
+
+::: {#refs}
+:::

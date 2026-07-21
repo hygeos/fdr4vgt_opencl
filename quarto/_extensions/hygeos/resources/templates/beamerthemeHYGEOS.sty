@@ -1,0 +1,214 @@
+% ============================================================
+%  Beamer theme HYGEOS
+%  Reproduces the HYGEOS PowerPoint template
+%  Colors: navy #002060, blue #4596D2, orange #F6A500, green #95C35B, lightblue #E5F4FD 
+%  Font: Quicksand (falls back to default sans if unavailable)
+% ============================================================
+\ProvidesPackage{beamerthemeHYGEOS}[2024/01/01 HYGEOS Beamer Theme]
+
+\mode<presentation>
+
+% ---- Required packages ----------------------------------------
+\RequirePackage{tikz}
+\RequirePackage{graphicx}
+\RequirePackage{ifthen}
+\RequirePackage{calc}
+\RequirePackage{xcolor}
+\RequirePackage{etoolbox}
+\RequirePackage{shellesc}
+\usetikzlibrary{positioning, calc}
+
+\newcommand{\HYGEOSlogofile}{logo-Hygeos.png}
+\newcommand{\HYGEOSheaderlogofile}{hygeos-header-logo.png}
+
+% ---- HYGEOS colour palette ------------------------------------
+\definecolor{HYGEOSnavy}{HTML}{002060}
+\definecolor{HYGEOSdarkblue}{HTML}{233165}
+\definecolor{HYGEOSblue}{HTML}{4596D2}
+\definecolor{HYGEOSlightblue}{HTML}{E5F4FD}
+\definecolor{HYGEOSorange}{HTML}{F6A500}
+\definecolor{HYGEOSgreen}{HTML}{95C35B}
+\definecolor{HYGEOSwhite}{HTML}{FFFFFF}
+
+% ---- Beamer color theme ---------------------------------------
+\setbeamercolor{normal text}{fg=HYGEOSnavy, bg=white}
+\setbeamercolor{alerted text}{fg=HYGEOSorange}
+\setbeamercolor{example text}{fg=HYGEOSgreen}
+
+\setbeamercolor{structure}{fg=HYGEOSblue}
+\setbeamercolor{palette primary}{fg=HYGEOSwhite, bg=HYGEOSnavy}
+\setbeamercolor{palette secondary}{fg=HYGEOSwhite, bg=HYGEOSblue}
+\setbeamercolor{palette tertiary}{fg=HYGEOSwhite, bg=HYGEOSorange}
+\setbeamercolor{palette quaternary}{fg=HYGEOSwhite, bg=HYGEOSgreen}
+
+\setbeamercolor{frametitle}{fg=HYGEOSwhite, bg=HYGEOSdarkblue}
+\setbeamercolor{framesubtitle}{fg=HYGEOSblue}
+\setbeamercolor{title}{fg=HYGEOSnavy}
+\setbeamercolor{subtitle}{fg=HYGEOSnavy}
+\setbeamercolor{author}{fg=HYGEOSnavy}
+\setbeamercolor{date}{fg=HYGEOSnavy}
+\setbeamercolor{institute}{fg=HYGEOSblue}
+
+\setbeamercolor{block title}{fg=HYGEOSwhite, bg=HYGEOSblue}
+\setbeamercolor{block body}{fg=HYGEOSnavy, bg=HYGEOSlightblue}
+\setbeamercolor{block title alerted}{fg=HYGEOSwhite, bg=HYGEOSorange}
+\setbeamercolor{block body alerted}{fg=HYGEOSnavy, bg=white}
+\setbeamercolor{block title example}{fg=HYGEOSwhite, bg=HYGEOSgreen}
+\setbeamercolor{block body example}{fg=HYGEOSnavy, bg=white}
+
+\setbeamercolor{itemize item}{fg=HYGEOSblue}
+\setbeamercolor{itemize subitem}{fg=HYGEOSorange}
+\setbeamercolor{itemize subsubitem}{fg=HYGEOSgreen}
+\setbeamercolor{enumerate item}{fg=HYGEOSblue}
+\setbeamercolor{enumerate subitem}{fg=HYGEOSorange}
+
+\setbeamercolor{section in toc}{fg=HYGEOSnavy}
+\setbeamercolor{subsection in toc}{fg=HYGEOSblue}
+
+\setbeamercolor{footline}{fg=HYGEOSwhite, bg=HYGEOSnavy}
+\setbeamercolor{headline}{fg=HYGEOSwhite, bg=HYGEOSnavy}
+\setbeamercolor{separation line}{fg=HYGEOSblue}
+
+% ---- Font theme -----------------------------------------------
+% Try to load Quicksand; if not available LaTeX falls back gracefully
+\usefonttheme{default}
+
+% Bold semi-bold look for titles
+\setbeamerfont{title}{size=\Large, series=\bfseries}
+\setbeamerfont{subtitle}{size=\normalsize, series=\bfseries}
+\setbeamerfont{frametitle}{size=\large, series=\bfseries}
+\setbeamerfont{framesubtitle}{size=\small, series=\normalfont}
+\setbeamerfont{author}{size=\small, series=\bfseries}
+\setbeamerfont{date}{size=\small}
+\setbeamerfont{institute}{size=\footnotesize}
+\setbeamerfont{block title}{size=\normalsize, series=\bfseries}
+\setbeamerfont{footline}{size=\tiny}
+
+% ---- Inner theme ----------------------------------------------
+\setbeamertemplate{itemize item}{\textbullet}
+\setbeamertemplate{itemize subitem}{--}
+\setbeamertemplate{itemize subsubitem}{\tiny\textbullet}
+\setbeamertemplate{navigation symbols}{}
+
+\setbeamertemplate{blocks}[rounded][shadow=false]
+
+% ---- Headline: three-segment coloured bar (blue / orange / green)
+\setbeamertemplate{headline}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    % Four-segment top bar — same proportions as HYGEOS PPTX
+    \fill[HYGEOSlightblue]   (current page.north west)
+                        rectangle ++(0.25\paperwidth, -0.04\paperheight);
+    \fill[HYGEOSblue]   ($(current page.north west)+(0.25\paperwidth,0)$)
+                        rectangle ++(0.25\paperwidth, -0.04\paperheight);
+    \fill[HYGEOSorange] ($(current page.north west)+(0.50\paperwidth,0)$)
+                        rectangle
+                        ++(0.25\paperwidth, -0.04\paperheight);
+    \fill[HYGEOSgreen]  ($(current page.north west)+(0.75\paperwidth,0)$)
+                        rectangle
+                        ++(0.25\paperwidth, -0.04\paperheight);
+  \end{tikzpicture}%
+  \vspace{0.04\paperheight}% push content below the bar
+}
+
+% ---- Footline: navy bar with date | project title | slide number
+\setbeamertemplate{footline}{%
+  \begin{beamercolorbox}[wd=\paperwidth, ht=0.055\paperheight,
+                          dp=0.02\paperheight]{footline}%
+    \begin{tikzpicture}[remember picture, overlay]
+      \node[anchor=west] at ($(current page.south west)+(0.02\paperwidth,0.032\paperheight)$) {%
+        \usebeamerfont{footline}\insertshortdate%
+      };
+      \node[anchor=center] at ($(current page.south)+(0,0.032\paperheight)$) {%
+        \usebeamerfont{footline}\MakeUppercase{\insertshorttitle}%
+      };
+      \node[anchor=east] at ($(current page.south east)+(-0.02\paperwidth,0.032\paperheight)$) {%
+        \usebeamerfont{footline}\insertframenumber%
+      };
+    \end{tikzpicture}%
+  \end{beamercolorbox}%
+}
+
+% ---- Frame title ----------------------------------------------
+\setbeamertemplate{frametitle}{%
+  \nointerlineskip%
+  \begin{beamercolorbox}[wd=\paperwidth, ht=0.09\paperheight,
+                          dp=0.005\paperheight, leftskip=0.05\paperwidth,
+                          rightskip=0.16\paperwidth]{frametitle}%
+    \vfill%
+    \usebeamerfont{frametitle}\usebeamercolor[fg]{frametitle}\insertframetitle%
+    \ifx\insertframesubtitle\empty\else%
+      \par\smallskip%
+      \usebeamerfont{framesubtitle}\usebeamercolor[fg]{framesubtitle}%
+      \insertframesubtitle%
+    \fi%
+    \begin{tikzpicture}[remember picture, overlay]
+      \node[anchor=east] at ($(current page.north east)+(-0.03\paperwidth,-0.085\paperheight)$) {%
+        \includegraphics[height=0.06\paperheight]{\HYGEOSheaderlogofile}%
+      };
+    \end{tikzpicture}%
+    \vfill%
+    \vspace{0.02\paperheight}%
+  \end{beamercolorbox}%
+}
+
+% ---- Title page -----------------------------------------------
+\setbeamertemplate{title page}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    %% Top coloured bar already drawn by headline template
+
+    %% Centred logo
+    \node[anchor=center] at ($(current page.center)+(0, -0.05\paperheight)$) {%
+      \includegraphics[width=0.15\paperwidth]{\HYGEOSlogofile}%
+    };
+
+    %% Title (above centre)
+    \node[anchor=south, text width=0.80\paperwidth, align=center]
+      at ($(current page.center)+(0, 0.12\paperheight)$) {%
+        \usebeamerfont{title}\usebeamercolor[fg]{title}%
+        \MakeUppercase{\inserttitle}%
+      };
+
+    %% Subtitle (below title)
+    \node[anchor=north, text width=0.80\paperwidth, align=center]
+      at ($(current page.center)+(0, 0.12\paperheight)$) {%
+        \usebeamerfont{subtitle}\usebeamercolor[fg]{subtitle}%
+        \MakeUppercase{\insertsubtitle}%
+      };
+
+    %% Author / institute (below logo)
+    \node[anchor=north, text width=0.80\paperwidth, align=center]
+      at ($(current page.center)+(0, -0.20\paperheight)$) {%
+        \usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor%
+        \ifx\insertinstitute\empty\else%
+          \par\smallskip%
+          \usebeamerfont{institute}\usebeamercolor[fg]{institute}\insertinstitute%
+        \fi%
+      };
+  \end{tikzpicture}%
+}
+
+% ---- Section page (optional divider slide) --------------------
+% Use \HYGEOSsectionpage in your document to insert a transition slide
+\newcommand{\HYGEOSsectionpage}{%
+  \begin{frame}[plain]
+    \begin{tikzpicture}[remember picture, overlay]
+      % Full blue background
+      \fill[HYGEOSblue] (current page.south west) rectangle (current page.north east);
+      % Four top segments
+      \fill[HYGEOSlightblue]   (current page.north west)
+                          rectangle ++(0.25\paperwidth, -0.04\paperheight);
+      \fill[HYGEOSblue]   ($(current page.north west)+(0.25\paperwidth,0)$)
+                          rectangle ++(0.25\paperwidth, -0.04\paperheight);
+      \fill[HYGEOSorange] ($(current page.north west)+(0.50\paperwidth,0)$)
+                          rectangle ++(0.25\paperwidth, -0.04\paperheight);
+      \fill[HYGEOSgreen]  ($(current page.north west)+(0.75\paperwidth,0)$)
+                          rectangle ++(0.25\paperwidth, -0.04\paperheight);
+      % Section name centred
+      \node[text=white, font=\Large\bfseries, align=center,
+            text width=0.80\paperwidth]
+        at (current page.center) {\MakeUppercase{\insertsectionhead}};
+    \end{tikzpicture}
+  \end{frame}
+}
+
+\mode<all>

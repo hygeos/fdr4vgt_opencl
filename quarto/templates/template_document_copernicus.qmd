@@ -1,0 +1,38 @@
+---
+title: "Document Template"
+author: "Copernicus Team"
+format:
+  html:
+    css: ../_extensions/copernicus/css/copernicus-docs.css
+  docx:
+    reference-doc: ../../FDR4VGT-AC-ATBD_v1.0.docx
+table-of-contents: true
+number-sections: true
+---
+
+# Introduction
+
+This document template is designed for Copernicus-style technical documentation.
+
+## Figure Example
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 2 * np.pi, 200)
+y = np.sin(x)
+
+fig, ax = plt.subplots(figsize=(7, 3))
+ax.plot(x, y, color="#003399", linewidth=2)
+ax.set_title("Example plot")
+ax.set_xlabel("x")
+ax.set_ylabel("sin(x)")
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
+
+# References
+
+Add a bibliography section here if needed for your project.

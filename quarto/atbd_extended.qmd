@@ -20,6 +20,8 @@ format:
 jupyter: fdr4vgt
 
 toc: true
+lof: true
+lot: true
 number-sections: false
 number-equations: true
 fontsize: 11pt
@@ -267,7 +269,7 @@ This v1.1 revision keeps the full v1.0 content below **unchanged** and adds the 
 
 ## Level 1C Input Data
 
-The data used as inputs are Proba-V-VGT1-VGT2 Top-Of-Atmosphere reflectances in 4 spectral bands (Table 5) and associated geometrical information and basic classification flags. Let us note that the viewing geometry could be different between VIS-NIR and SWIR bands. The RSRF's of each band is slightly different between the 3 cameras labelled LEFT, CENTER and RIGHT that cover Proba-V field of view but one RSRF's for VGTs. The philosophy of the AC algorithm is to process the data band per band without the use of any spectral, spatial or temporal features. Therefore, the format of the input data is not important and the processing of individual pixels for selected bands or an entire Level 1 tile is similar.
+The data used as inputs are Proba-V-VGT1-VGT2 Top-Of-Atmosphere reflectances in 4 spectral bands (Table 1) and associated geometrical information and basic classification flags. Let us note that the viewing geometry could be different between VIS-NIR and SWIR bands. The RSRF's of each band is slightly different between the 3 cameras labelled LEFT, CENTER and RIGHT that cover Proba-V field of view but one RSRF's for VGTs. The philosophy of the AC algorithm is to process the data band per band without the use of any spectral, spatial or temporal features. Therefore, the format of the input data is not important and the processing of individual pixels for selected bands or an entire Level 1 tile is similar.
 
 **Spectral Bands** (Proba-V example):
 
@@ -557,7 +559,7 @@ We use$\ \delta P_{s} = 10\ hPa,\ \delta\tau_{a}^{550} = 0.1\ \tau_{a}^{550}$. T
 
 # Validation Strategy
 
-TOC-r's obtained with several aerosol ancillary data are validated with in-situ reference product obtained from AERONET data (version 3 of inverted AOD, spectral index of refraction and volume particle size distribution) and the 6S accurate atmospheric correction method. The comparison is made for N=48 AERONET sites (see Table 1) that cover different biomes, locations and meteorological conditions. Extraction of Proba-V data TOA-r and TOC-r' are done for 300 m products and TOA-r are processed with the 6S atmospheric correction software with AERONET data as inputs as it is done in the ACIX project (see Figure 1). TOC-r are evaluated using the same metrics as in ACIX
+TOC-r's obtained with several aerosol ancillary data are validated with in-situ reference product obtained from AERONET data (version 3 of inverted AOD, spectral index of refraction and volume particle size distribution) and the 6S accurate atmospheric correction method. The comparison is made for N=48 AERONET sites (see Table 2) that cover different biomes, locations and meteorological conditions. Extraction of Proba-V data TOA-r and TOC-r' are done for 300 m products and TOA-r are processed with the 6S atmospheric correction software with AERONET data as inputs as it is done in the ACIX project (see Figure 1). TOC-r are evaluated using the same metrics as in ACIX
 
 $A = \frac{1}{N}\left( \sum_{i = 1}^{N}{\Delta{toc\_ r}_{i}^{}} \right)$, Accuracy
 
@@ -569,7 +571,7 @@ with$\ \Delta{toc\_ r}_{i}^{} = \left( {toc\_ r}_{i}^{processor} - \ {toc\_ r}_{
 
 ![](./media/media/image1.png){width="5.409448818897638in" height="2.952755905511811in"}
 
-Figure : Validation methodology logic
+Figure 1: Validation methodology logic
 
 ::: {.content-visible when-format="docx"}
 ![](./media/media/image2.emf){width="5.8125in" height="3.1775317147856517in"}
@@ -579,7 +581,7 @@ Figure : Validation methodology logic
 *(Figure omitted in PDF export: original diagram is a Windows EMF vector graphic not convertible in this environment; see the DOCX version of this ATBD for the figure.)*
 :::
 
-Table : List of AERONET sites used for validation
+Table 2: List of AERONET sites used for validation
 
 # Uncertainty Analysis Following FIDUCEO Approach
 
@@ -682,7 +684,7 @@ Following Popp and Mittaz (2022), each uncertainty source is characterized throu
 | Sensitivity                  | c₁ = ∂R~toc~/∂R~toa~ = η²·T      | Analytical Jacobian from SMAC                |
 +------------------------------+----------------------------------+----------------------------------------------+
 
-Table TOA reflectance uncertainty summary
+Table 3: TOA reflectance uncertainty summary
 
 ## Ozone Column Uncertainty
 
@@ -708,7 +710,7 @@ Table TOA reflectance uncertainty summary
 | Sensitivity                  | c₂ = ∂R~toc~/∂U~O₃~                     | Analytical: ∂R~toc~/∂U~O₃~ = ∂R~toc~/∂T~O₃~ · ∂T~O₃~/∂U~O₃~ |
 +------------------------------+-----------------------------------------+-------------------------------------------------------------+
 
-Table : Ozone uncertainty summary
+Table 4: Ozone uncertainty summary
 
 ## Water Vapor Column Uncertainty
 
@@ -734,7 +736,7 @@ Table : Ozone uncertainty summary
 | Sensitivity                  | c₃ = ∂R~toc~/∂U~H₂O~                 | Analytical (same form as ozone)            |
 +------------------------------+--------------------------------------+--------------------------------------------+
 
-Table : Water vapor uncertainty summary
+Table 5: Water vapor uncertainty summary
 
 ## Surface Pressure Uncertainty {#effect-4-surface-pressure-uncertainty-1}
 
@@ -752,11 +754,7 @@ However, the uncertainty in the geolocation could result in a significant uncert
 
 For example, if the geolocation error is purely random and isotropic, with a stable standard deviation, one may estimate the altitude error from local terrain slope and geolocation error.
 
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                                                      |
-+:=====================================================================================================================================================================================+
-| ![](./media/media/image3.png){width="2.893700787401575in" height="2.425196850393701in"} ![](./media/media/image4.png){width="2.8976377952755907in" height="2.4606299212598426in"} \| |
-+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+![](./media/media/image3.png){width="2.893700787401575in" height="2.425196850393701in"} ![](./media/media/image4.png){width="2.8976377952755907in" height="2.4606299212598426in"}
 
 Figure 2: Surface elevation (left) and local standard deviation of altitude (right), both in m, from GTOPO30.
 
@@ -778,29 +776,29 @@ and
 
 $$J_{P_{s}}^{z} = - \frac{gP_{S}}{r(T - \lambda z)}$$ {#eq-eq25}
 
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Descriptor                   | Value                                                                                    | Notes                                                                                |
-+:=============================+:=========================================================================================+:=====================================================================================+
-| Name                         | Surface pressure uncertainty                                                             |                                                                                      |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Affected term                | Rtoc = f(Ps) via Rayleigh scattering                                                     |                                                                                      |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Maturity                     | 3 - Rigorous propagation                                                                 | From DEM + meteorological uncertainty                                                |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Correlation type             | Mixed: meteorological (common) + elevation (structured)                                  |                                                                                      |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Correlation scale (spatial)  | Meteo: global; Elev: DEM resolution                                                      |                                                                                      |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Correlation scale (temporal) | Meteo: \>1 month; Elev: permanent                                                        |                                                                                      |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| PDF shape                    | Gaussian                                                                                 |                                                                                      |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Magnitude                    | u(Ps) = √\[($\mathrm{\Delta}_{P_{s}}^{\lambda}$)² + ($\mathrm{\Delta}_{P_{s}}^{z}$)²\]/2 | $\mathrm{\Delta}_{P_{s}}^{\lambda}$ \~1 hPa, $\mathrm{\Delta}_{P_{s}}^{z}$ from derived $\Delta z$ |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
-| Sensitivity                  | c₄ = ∂Rtoc/∂Ps                                                                           | Finite difference: δPs = 10 hPa                                                      |
-+------------------------------+------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Descriptor                   | Value                                                   | Notes                                   |
++:=============================+:========================================================+:========================================+
+| Name                         | Surface pressure uncertainty                            |                                         |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Affected term                | Rtoc = f(Ps) via Rayleigh scattering                    |                                         |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Maturity                     | 3 - Rigorous propagation                                | From DEM + meteorological uncertainty   |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Correlation type             | Mixed: meteorological (common) + elevation (structured) |                                         |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Correlation scale (spatial)  | Meteo: global; Elev: DEM resolution                     |                                         |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Correlation scale (temporal) | Meteo: \>1 month; Elev: permanent                       |                                         |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| PDF shape                    | Gaussian                                                |                                         |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Magnitude                    | u(Ps) = sqrt((ΔPs^λ)^2 + (ΔPs^z)^2) / sqrt(2)           | ΔPs\^λ \~ 1 hPa; ΔPs\^z from derived Δz |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
+| Sensitivity                  | c4 = ∂Rtoc/∂Ps                                          | Finite difference: δPs = 10 hPa         |
++------------------------------+---------------------------------------------------------+-----------------------------------------+
 
-Table : Surface pressure uncertainty summary
+Table 6: Surface pressure uncertainty summary
 
 > **Critical Implementation Note (v1.1):** the computation of $T^{'} = \ln(rT) - \ln(rT - r\lambda z)$ overflows in float16 for typical temperatures ($T \approx 290$ K, $rT \approx 83246$, which exceeds the float16 maximum of 65504), producing NaN pressure and NaN Rtoc. The implementation therefore stores and processes `SLP` and `T10M` as **float32** in the ancillary cache (`_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}`). See Appendix D.2 for details.
 
@@ -816,13 +814,9 @@ The community is moving toward probabilistic frameworks that explicitly quantify
 
 The AOD uncertainties (Root Mean Square Errors) could be assigned on a regional scale using a climate type classification map like the one used in Gueymard and Yang 2020. Years of AOD \@550 and Angström exponent 3-hourly datasets from MERRA-2 and CAMS have been evaluated at 793 AERONET stations. The validation was conducted based on continents and Köppen-Geiger classification (see Figure 3).
 
-+------------------------------------------------------------------------------+
-|                                                                              |
-+:=============================================================================+
-| ![](./media/media/image5.png){width="5.479861111111111in" height="3.6in"} \| |
-+------------------------------------------------------------------------------+
+![](./media/media/image5.png){width="5.479861111111111in" height="3.6in"}
 
-Figure : Map of Köppen-Geiger climate classification
+Figure 3: Map of Köppen-Geiger climate classification
 
 #### RMSE Model
 
@@ -856,27 +850,27 @@ Köppen-Geiger climate classification multipliers are applied operationally to t
 | High pollution       | 1.3×           | East Asia, South Asia      |
 +----------------------+----------------+----------------------------+
 
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Descriptor                   | Value                                                                                | Notes                               |
-+:=============================+:=====================================================================================+:====================================+
-| Name                         | AOD at 550 nm uncertainty                                                            |                                     |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Affected term                | Rtoc = f(τ~a~⁵⁵⁰)                                                                    |                                     |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Maturity                     | 3 - Based on comprehensive validation                                                | Gueymard & Yang (2020) study        |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Correlation type             | Structured (aerosol transport patterns)                                              |                                     |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Correlation scale (spatial)  | Regional (\~200-500 km)                                                              | Aerosol plume extent                |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Correlation scale (temporal) | \~1 week                                                                             | Aerosol lifetime                    |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| PDF shape                    | Skewed Gaussian (log-normal for high AOD)                                            |                                     |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
-| Magnitude                    | σ(τ~a~⁵⁵⁰) = max(0.03, 0.15×τ~a~⁵⁵⁰) × M~KG~ | $M_{KG}$ from Köppen-Geiger class |
-+------------------------------+--------------------------------------------------------------------------------------+-------------------------------------+
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| Descriptor                   | Value                                                                         | Notes                          |
++:=============================+:==============================================================================+:===============================+
+| Name                         | AOD at 550 nm uncertainty                                                     |                                |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| Affected term                | Rtoc = f(τ~a~⁵⁵⁰)                                                             |                                |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| Maturity                     | 3 - Based on comprehensive validation                                         | Gueymard and Yang (2020) study |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| Correlation type             | Structured (aerosol transport patterns)                                       |                                |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| Correlation scale (spatial)  | Regional (\~200-500 km)                                                       | Aerosol plume extent           |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| Correlation scale (temporal) | \~1 week                                                                      | Aerosol lifetime               |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| PDF shape                    | Skewed Gaussian (log-normal for high AOD)                                     |                                |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
+| Magnitude                    | σ(τ~a~⁵⁵⁰) = max(0.03, 0.15×τ~a~⁵⁵⁰) × M~KG~ (M~KG~ from Köppen-Geiger class) |                                |
++------------------------------+-------------------------------------------------------------------------------+--------------------------------+
 
-Table AOD550 uncertainty summary
+Table 7: AOD550 uncertainty summary
 
 ## Aerosol Model Selection Uncertainty
 
@@ -890,13 +884,9 @@ The SMAC coefficients are computed by an in-house radiative transfer model depen
 
 So, it is possible simply to choose a couple of aerosol models that fit best with the MERRA-2 data and run SMAC-CL on an ensemble of models. We rely here on the AMIP dataset (see section 2.4) that yields an ensemble of 10 aerosols models globally monthly. An example is given in Figure 4 .
 
-+---------------------------------------------------------------------------------------------+
-|                                                                                             |
-+:============================================================================================+
-| ![](./media/media/image6.png){width="5.0078740157480315in" height="7.437007874015748in"} \| |
-+---------------------------------------------------------------------------------------------+
+![](./media/media/image6.png){width="5.0078740157480315in" height="7.437007874015748in"}
 
-Figure : SMAC Aerosol model index (0-147) reconstructed from the AMIP ensemble runs #1-10 for December 2010
+Figure 4: SMAC Aerosol model index (0-147) reconstructed from the AMIP ensemble runs #1-10 for December 2010
 
 +------------------------------+---------------------------------------------------------------------+------------------------+
 | Descriptor                   | Value                                                               | Notes                  |
@@ -926,7 +916,7 @@ Figure : SMAC Aerosol model index (0-147) reconstructed from the AMIP ensemble r
 |                              | ``` 3. ``u_Rtoc_ensemble`` = ``standard_deviation``(``Rtoc,j``) ``` |                        |
 +------------------------------+---------------------------------------------------------------------+------------------------+
 
-Table : Aerosol model uncertainty summary
+Table 8: Aerosol model uncertainty summary
 
 ## Radiative Transfer Approximations
 
@@ -954,7 +944,9 @@ $u\left( R_{toc}^{j} \right)_{RTM\_BRDF} = \left( {\ k}_{1}^{p}=0,k_{2}^{p} =0 \
 | Mitigation   | Using BRDF included in the product \* |                                     |
 +--------------+---------------------------------------+-------------------------------------+
 
-(\* https://dast.copernicus-climate.eu/documents/satellite-albedo/D1.3.4-v2.0_ATBD_CDR_SA_MULTI_SENSOR_v2.0_PRODUCTS_v1.1.pdf) Table : RTM Lambertian assumption uncertainty summary
+(\* https://dast.copernicus-climate.eu/documents/satellite-albedo/D1.3.4-v2.0_ATBD_CDR_SA_MULTI_SENSOR_v2.0_PRODUCTS_v1.1.pdf)
+
+Table 9: RTM Lambertian assumption uncertainty summary
 
 ### Terrain Slope Effects
 
@@ -992,10 +984,12 @@ $$f_{sky} = \frac{1 + \mu}{2}$$ {#eq-eq30} - Ground view factor:
 $$f_{ground} = \frac{1 - \mu}{2}$$ {#eq-eq31} - Slope Error
 
 $$slope_{eff} = \frac{T}{
-T_{dir} \cdot \frac{\mu_{i}}{\mu_{s}}
+T_{dir} \cdot \max\left(0,\frac{\mu_{i}}{\mu_{s}}\right)
 + T_{dif} \cdot f_{sky}
 + T \cdot f_{ground} \cdot \rho_{env}
 }$$ {#eq-eq32}
+
+with the direct term explicitly set to zero for terrain facets facing away from the sun ($\mu_i \le 0$), so it never contributes a negative correction.
 
 - ${u\left( R_{toc}^{j} \right)}_{RTM - slope} = R_{toc}^{j}*(slope_{eff} - 1)$
 
@@ -1021,7 +1015,7 @@ $\rho_{env}:$ Average environment reflectance, (supposed here equal to pixel gro
 | Mitigation   | Simple model                            | From CESBIO simple model (see text) |
 +--------------+-----------------------------------------+-------------------------------------+
 
-Table : RTM terrain effect uncertainty summary
+Table 10: RTM terrain effect uncertainty summary
 
 ### SMAC Polynomial Fitting Errors
 
@@ -1037,7 +1031,7 @@ The estimation of the uncertainty due to the SMAC fitting errors is presented in
 | Magnitude     | \~1-10% RMSE vs. 6S                   | Validated with neural network |
 +---------------+---------------------------------------+-------------------------------+
 
-Table : SMAC fitting uncertainty summary
+Table 11: SMAC fitting uncertainty summary
 
 ## Uncertainty Characterization Summary
 
@@ -1131,7 +1125,7 @@ Effects considered minor and not explicitly propagated:
 | Spectral band mismatch                  | \<0.002             | SMAC computed for actual RSR       |
 +-----------------------------------------+---------------------+------------------------------------+
 
-Table : Second order uncertainty summary
+Table 12: Second order uncertainty summary
 
 **Combined second-order**: u(0) ≈ 0.007 (added quadratically to total)
 
@@ -1205,21 +1199,23 @@ We give here typical atmospheric gaseous transmissions in the Proba-V spectral b
 
 ![](./media/media/image7.png){width="4.803149606299213in" height="3.2007874015748032in"}![](./media/media/image8.png){width="4.803149606299213in" height="3.2007874015748032in"}![](./media/media/image9.png){width="4.803149606299213in" height="3.2007874015748032in"}![](./media/media/image10.png){width="4.803149606299213in" height="3.2007874015748032in"}
 
+Figure 5: Typical atmospheric gaseous transmissions in Proba-V bands and associated spectral response functions (CENTER camera examples).
+
 ## Processing chain
 
-In Figure 5 is shown how SMAC coefficients are derived from basic data.
+In Figure 6 is shown how SMAC coefficients are derived from basic data.
 
 ![](./media/media/image11.png){width="6.15625in" height="3.3991786964129482in"}
 
-Figure 5 Organization of the radiative transfer tools at HYGEOS for computing atmospheric Look Up Tables from primary data
+Figure 6: Organization of the radiative transfer tools at HYGEOS for computing atmospheric Look Up Tables from primary data
 
 ## Gaseous absorption modelling
 
-With the RSRF data as described in the previous section, we computed the typical absorption based on the spectroscopic HITRAN 2012/2016 database (Gordon et al., 2017) and the line by line radiative transfer tools Py4Cats (Schreier et al., 2013) and/or HAPI (Kochanov et al., 2016). Then regression of gaseous transmission versus gas concentrations, air masses and barometric pressure (see Figure 6) were computed to yield SMAC coefficients fitting the gaseous absorption. Correlated K-distribution coefficients computed with the new tool PyKdis, developed by HYGEOS, are also obtained in this step, for further use in the simulation of real TOA radiances for both sensors.
+With the RSRF data as described in the previous section, we computed the typical absorption based on the spectroscopic HITRAN 2012/2016 database (Gordon et al., 2017) and the line by line radiative transfer tools Py4Cats (Schreier et al., 2013) and/or HAPI (Kochanov et al., 2016). Then regression of gaseous transmission versus gas concentrations, air masses and barometric pressure (see Figure 7) were computed to yield SMAC coefficients fitting the gaseous absorption. Correlated K-distribution coefficients computed with the new tool PyKdis, developed by HYGEOS, are also obtained in this step, for further use in the simulation of real TOA radiances for both sensors.
 
 ![](./media/media/image12.png){width="5.118055555555555in" height="3.8381944444444445in"}
 
-Figure 6: Example of the fit of water vapor transmission in band 2 of Proba-V Center camera. SMAC fitting model is T = exp ( a . (m. U~H2O~)^n^), where m is the air mass and U~H2O~ is the water vapor column
+Figure 7: Example of the fit of water vapor transmission in band 2 of Proba-V Center camera. SMAC fitting model is T = exp ( a . (m. U~H2O~)^n^), where m is the air mass and U~H2O~ is the water vapor column
 
 ## Radiative transfer computations and fit accuracy
 
@@ -1243,19 +1239,19 @@ For each band, those optical quantities are simulated for various geometries, su
 
 - AOT at 550 nm: 16 values from 0.01 to 1.5 (but used only if \< 0.8)
 
-Several multi-dimensional fits are performed to give the SMAC model parameters of scattering quantities. An estimation of the quality of the fit is also obtained, giving the potential to estimate the radiative transfer modeling error (see Figure 7, Figure 8, Figure 9).
+Several multi-dimensional fits are performed to give the SMAC model parameters of scattering quantities. An estimation of the quality of the fit is also obtained, giving the potential to estimate the radiative transfer modeling error (see Figure 8, Figure 9, Figure 10).
 
 ![](./media/media/image13.png){width="4.803149606299213in" height="3.2007874015748032in"}
 
-Figure 7: Example of accuracy of the SMAC model compared to ARTDECO. Aerosol TOA reflectance for band 01 of Proba-V center camera for one SZA and VZA and for all azimuth, for AOT at 550 nm ranging from 0.01 to 1 and for the aerosol model #1. The fit was performed for all VZA \< 60, SZA \<70, AOT (550) \<0.76, all azimuths. The accuracy decreases above an AOT at 550 nm of \~ 0.5
+Figure 8: Example of accuracy of the SMAC model compared to ARTDECO. Aerosol TOA reflectance for band 01 of Proba-V center camera for one SZA and VZA and for all azimuth, for AOT at 550 nm ranging from 0.01 to 1 and for the aerosol model #1. The fit was performed for all VZA \< 60, SZA \<70, AOT (550) \<0.76, all azimuths. The accuracy decreases above an AOT at 550 nm of \~ 0.5
 
 ![](./media/media/image14.png){width="4.803149606299213in" height="3.2007874015748032in"}
 
-Figure 8 : Same as Figure 7 but for TOA atmospheric reflectance.
+Figure 9: Same as Figure 8 but for TOA atmospheric reflectance.
 
 ![](./media/media/image15.png){width="6.3in" height="3.1180555555555554in"}
 
-Figure : Rtoa SMAC Fit mean accuracy as a function of the various inputs. Statistics are given for all the LUT nodes and AOT (550) \<0.76.
+Figure 10: Rtoa SMAC Fit mean accuracy as a function of the various inputs. Statistics are given for all the LUT nodes and AOT (550) \<0.76.
 
 ### References
 
@@ -1291,7 +1287,9 @@ The required library for the inference of ML model is ONNXRuntime. It is a libr
 
 After using the SMAC coefficients simulations representing more than 106 points, we performed a test using a very fast pots processing pure python NN inference for one band. The test outcome, shown hereafter, is promising to show a Mean Square Error of 0.0097 on the predicted RTM uncertainty on R~toc~
 
-> ![](./media/media/image16.png){width="6.3in" height="2.3506944444444446in"}
+![](./media/media/image16.png){width="6.3in" height="2.3506944444444446in"}
+
+Figure 11: Example of RTM fit uncertainty prediction from the ONNX model for one spectral band.
 
 ## BRDF effect estimation
 
@@ -1379,7 +1377,7 @@ $$\frac{\overline{\overline{\rho_{g}}}}{\rho_{g}} = \frac{1 + k_{1}^{p}\overline
 
 The estimation of BRDF effects requires the knowledge of $k_{1}^{p}$ and${\ k}_{2}^{p}$, the kernels and their directional averages are analytically computed
 
-SMAC general philosophy is to approximate atmospheric functions with simple and fast regression. We thus analysed the variations of the kernel directional averages as a function of wavelength and aerosol optical thickness. The computation has been made with exact radiative transfer computations for the downward atmospheric radiances and integration using Equations (38). Figure 10 and Figure 11 show some examples of $\overline{{\ F}_{1}},\overline{F_{2}},\overline{\overline{F_{1}}},\overline{\overline{F_{2}}}$ in the NIR for one aerosol model and 2 AOTs as well as the case where the sky radiance is supposed isotropic. In the latter case the kernel directional single (resp. double) integral is simply the hemispherical-directional (resp. bi hemispherical) albedo. Directionality is still pronounced for single integrals, and smooth for double ones. It is mainly dependent on wavelength and not AOT and the directional behaviour is like the kernels themselves. So the idea here is to make a computation of $\overline{{\ F}_{1}},\overline{F_{2}},\overline{\overline{F_{1}}},\overline{\overline{F_{2}}}$ as linear combinations of the kernels F~1~ and F~2~, the coefficients of the combinations being only functions of the spectral channel.
+SMAC general philosophy is to approximate atmospheric functions with simple and fast regression. We thus analysed the variations of the kernel directional averages as a function of wavelength and aerosol optical thickness. The computation has been made with exact radiative transfer computations for the downward atmospheric radiances and integration using Equations (38). Figure 12 and Figure 13 show some examples of $\overline{{\ F}_{1}},\overline{F_{2}},\overline{\overline{F_{1}}},\overline{\overline{F_{2}}}$ in the NIR for one aerosol model and 2 AOTs as well as the case where the sky radiance is supposed isotropic. In the latter case the kernel directional single (resp. double) integral is simply the hemispherical-directional (resp. bi hemispherical) albedo. Directionality is still pronounced for single integrals, and smooth for double ones. It is mainly dependent on wavelength and not AOT and the directional behaviour is like the kernels themselves. So the idea here is to make a computation of $\overline{{\ F}_{1}},\overline{F_{2}},\overline{\overline{F_{1}}},\overline{\overline{F_{2}}}$ as linear combinations of the kernels F~1~ and F~2~, the coefficients of the combinations being only functions of the spectral channel.
 
 $$\begin{aligned}
 {\overline{F}}_{1} &= d_{1}^{0} + d_{1}^{1}\mathbf{F}_{\mathbf{1}} + d_{1}^{2}\mathbf{F}_{\mathbf{2}} \\
@@ -1401,43 +1399,23 @@ $$\begin{aligned}
 
 The 12 regressions coefficients $d_{i}^{k}$ and $b_{i}^{k}$ are stored in the SMAC coefficient's structure. F~1~ and F~2~ are analytical functions, computed once per pixel. Therefore, the corrective BRDF terms are calculated extremely fast.
 
-The accuracy of such modelling has been checked against exact computations and compared to the accuracy of the lambertian assumption. A typical example is given in Figure 12 and Figure 13 for a scene that consists of a vegetation target in the NIR with a high aerosol load, where the BRDF effects are the highest. On can see that the lambertian assumption leads to directional biases that could reach 10% for oblique views and SZA=60°. Our simple model significantly reduces the intensity and directional dependence of those biases.
+The accuracy of such modelling has been checked against exact computations and compared to the accuracy of the lambertian assumption. A typical example is given in Figure 14 and Figure 15 for a scene that consists of a vegetation target in the NIR with a high aerosol load, where the BRDF effects are the highest. On can see that the lambertian assumption leads to directional biases that could reach 10% for oblique views and SZA=60°. Our simple model significantly reduces the intensity and directional dependence of those biases.
 
-+----------------------------------------------------------------------------------------------+
-| ![](./media/media/image17.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
-+:=============================================================================================+
-| ![](./media/media/image18.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
-+----------------------------------------------------------------------------------------------+
-| ![](./media/media/image19.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
-+----------------------------------------------------------------------------------------------+
+![](./media/media/image17.png){width="5.822834645669292in" height="2.4960629921259843in"} ![](./media/media/image18.png){width="5.822834645669292in" height="2.4960629921259843in"} ![](./media/media/image19.png){width="5.822834645669292in" height="2.4960629921259843in"}
 
-Figure : Polar plots of F1: geometric kernel (left), single and double directional averages ${\overline{F}}_{1}$ (centre) and $\overline{\overline{F_{1}}}$ (right) as a function of view zenith angle (VZA) and relative azimuth angles (RAA) and for a SZA of 60° and λ=865 nm. Transects correspond to RAA=0 (black), 60 (red) and 90° (green). (TOP) AOT=0.01, (MIDDLE) AOT=0.4, (BOTTOM) the sky downward radiance is assumed isotropic.
+Figure 12: Polar plots of F1: geometric kernel (left), single and double directional averages ${\overline{F}}_{1}$ (centre) and $\overline{\overline{F_{1}}}$ (right) as a function of view zenith angle (VZA) and relative azimuth angles (RAA) and for a SZA of 60° and λ=865 nm. Transects correspond to RAA=0 (black), 60 (red) and 90° (green). (TOP) AOT=0.01, (MIDDLE) AOT=0.4, (BOTTOM) the sky downward radiance is assumed isotropic.
 
-+----------------------------------------------------------------------------------------------+
-| ![](./media/media/image20.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
-+:=============================================================================================+
-| ![](./media/media/image21.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
-+----------------------------------------------------------------------------------------------+
-| ![](./media/media/image22.png){width="5.822834645669292in" height="2.4960629921259843in"} \| |
-+----------------------------------------------------------------------------------------------+
+![](./media/media/image20.png){width="5.822834645669292in" height="2.4960629921259843in"} ![](./media/media/image21.png){width="5.822834645669292in" height="2.4960629921259843in"} ![](./media/media/image22.png){width="5.822834645669292in" height="2.4960629921259843in"}
 
-Figure : Same as Figure 10 but for the volumetric kernel${\ F}_{2}$.
+Figure 13: Same as Figure 12 but for the volumetric kernel${\ F}_{2}$.
 
-+---------------------------------------------------------------------------------------------+
-| ![](./media/media/image23.png){width="6.792361111111111in" height="2.263888888888889in"} \| |
-+:============================================================================================+
-| ![](./media/media/image24.png){width="6.792361111111111in" height="2.263888888888889in"} \| |
-+---------------------------------------------------------------------------------------------+
+![](./media/media/image23.png){width="6.792361111111111in" height="2.263888888888889in"} ![](./media/media/image24.png){width="6.792361111111111in" height="2.263888888888889in"}
 
-Figure 12 : Polar plots of the TOA reflectance for the Proba-V NIR band and for a typical vegetation target modelled as \[k~0~=0.36, k~1~=0.03, k~2~ =0.24\] and for SZA = 30° and AOT=0.4. The transects correspond to RAA=0° (black), and 90° (red) (Left) Exact computation, (centre) Approximation and (right) relative difference in % between approximation and exact computations. (TOP) 6S formulation where the surface is considered lambertian, (BOTTOM) 6S formulation with a modelled surface BRDF as described in this section.
+Figure 14: Polar plots of the TOA reflectance for the Proba-V NIR band and for a typical vegetation target modelled as \[k~0~=0.36, k~1~=0.03, k~2~ =0.24\] and for SZA = 30° and AOT=0.4. The transects correspond to RAA=0° (black), and 90° (red) (Left) Exact computation, (centre) Approximation and (right) relative difference in % between approximation and exact computations. (TOP) 6S formulation where the surface is considered lambertian, (BOTTOM) 6S formulation with a modelled surface BRDF as described in this section.
 
-+------------------------------------------------------------------------------------------+
-|                                                                                          |
-+:=========================================================================================+
-| ![](./media/media/image26.png){width="6.792361111111111in" height="2.263888888888889in"} |
-+------------------------------------------------------------------------------------------+
+![](./media/media/image26.png){width="6.792361111111111in" height="2.263888888888889in"}
 
-Figure : same as Figure 12 but for SZA=60°.
+Figure 15: same as Figure 14 but for SZA=60°.
 
 # Appendix B: Aerosol Model Definitions
 
@@ -1459,21 +1437,21 @@ X~u~ = $\frac{\mathbf{\tau}_{\mathbf{a}\mathbf{;}\mathbf{u}}^{\mathbf{550}}}{\ma
 *(Figure omitted in PDF export: original table is a Windows EMF vector graphic not convertible in this environment; see the DOCX version of this ATBD for the figure.)*
 :::
 
-Table : Statistics about AOT's of each aerosol component from MERRA-2 analysis of 4 days in 2011
+Table 13: Statistics about AOT's of each aerosol component from MERRA-2 analysis of 4 days in 2011
 
 Each mixing ratio X~u~ covers the 0-100% range except BC which remains smaller than 25% on the four dates. The SU, DU, OC and SS X~u~ are defined between 0 and 100% with steps of 20%, and the BC X~u~ is defined between 0 and 30% with a step of 5%.
 
-From the 5x5x5x5x6=3750 possible combinations, 148 combinations of the component X~u~ effectively occur on the 44 688 pixels of 2011/07/01. These 148 combinations of the components X~u~ define 148 aerosol models. (See Figure 14)
+From the 5x5x5x5x6=3750 possible combinations, 148 combinations of the component X~u~ effectively occur on the 44 688 pixels of 2011/07/01. These 148 combinations of the components X~u~ define 148 aerosol models. (See Figure 16)
 
 ![](./media/media/image28.png){width="6.146489501312336in" height="3.7656889763779526in"}
 
-Figure : AOT's ratio's X~u~ of the 5 MERRA-2 aerosol components of the 148 aerosol model used in this study
+Figure 16: AOT's ratio's X~u~ of the 5 MERRA-2 aerosol components of the 148 aerosol model used in this study
 
 ## Aerosol optical properties
 
-To calculate easily the optical properties of these mixing, we directly associate one OPAC aerosol model/component with each component u from MERRA-2 (see Table 13). For the moment the relative humidity is considered fixed to 80%
+To calculate easily the optical properties of these mixing, we directly associate one OPAC aerosol model/component with each component u from MERRA-2 (see Table 14). For the moment the relative humidity is considered fixed to 80%
 
-Table : Mapping between MERRA-2 aerosol component and OPAC for the computation of optical properties
+Table 14: Mapping between MERRA-2 aerosol component and OPAC for the computation of optical properties
 
 | **MERRA-2 aerosol component** | **OPAC model or component (RH=80%)** |
 |:------------------------------|:-------------------------------------|
@@ -1501,27 +1479,15 @@ And the derived asymmetry parameter:
 
 $g(\lambda) = \frac{1}{2}\int_{- 1}^{1}{\mu P(\mu,\lambda)}d\mu$ with $\mu = cos(\theta)$
 
-These aerosol optical properties are plotted in Figure 15 and Figure 16.
+These aerosol optical properties are plotted in Figure 17 and Figure 18.
 
-+--------------------------------------------------------------------------------------------+
-|                                                                                            |
-+:===========================================================================================+
-| ![](./media/media/image30.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
-+--------------------------------------------------------------------------------------------+
-| ![](./media/media/image31.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
-+--------------------------------------------------------------------------------------------+
+![](./media/media/image30.png){width="3.5984251968503935in" height="2.3976377952755907in"} ![](./media/media/image31.png){width="3.5984251968503935in" height="2.3976377952755907in"}
 
-Figure : OPAC Aerosols components optical properties with RH=80% at the Proba-V spectral bands
+Figure 17: OPAC Aerosols components optical properties with RH=80% at the Proba-V spectral bands
 
-+--------------------------------------------------------------------------------------------+
-|                                                                                            |
-+:===========================================================================================+
-| ![](./media/media/image33.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
-+--------------------------------------------------------------------------------------------+
-| ![](./media/media/image34.png){width="3.5984251968503935in" height="2.3976377952755907in"} |
-+--------------------------------------------------------------------------------------------+
+![](./media/media/image33.png){width="3.5984251968503935in" height="2.3976377952755907in"} ![](./media/media/image34.png){width="3.5984251968503935in" height="2.3976377952755907in"}
 
-Figure : 148 Aerosols mixtures optical properties at the Proba-V spectral bands.
+Figure 18: 148 Aerosols mixtures optical properties at the Proba-V spectral bands.
 
 # Appendix C: SMAC-CL Implementation
 
@@ -1561,7 +1527,7 @@ $\mathbf{\tau}_{\mathbf{a;DU;AMIPj}}^{\mathbf{550}}\mathbf{,\ }\mathbf{\tau}_{\m
 
 The auxiliary data is then converted from MERRA-2 to SMAC units:
 
-1.  Table: MERRA-2 and SMAC units
+Table 15: MERRA-2 and SMAC units
 
 | Variable | MERRA-2 unit | SMAC unit | Conversion factor |
 |:---------|:-------------|:----------|:------------------|
@@ -1583,7 +1549,7 @@ X~u~ = $\frac{\mathbf{\tau}_{\mathbf{a}\mathbf{;}\mathbf{u}}^{\mathbf{550}}}{\ma
 
 The X~u,i~ basis for the 148 predefined models are stored in a text file and read once.
 
-An example of interpolated inputs is given in Figure 17 : Example of inputs ancillary atmospheric data for a VGT sub-image
+An example of interpolated inputs is given in Figure 19 : Example of inputs ancillary atmospheric data for a VGT sub-image
 
 The list of aerosol models of AMIP are also computed using the same approach to give **iaero~AMIPj~** for j in 1...10
 
@@ -1667,6 +1633,8 @@ def smac_cl_run(
 
 ![](./media/media/image35.png){width="6.873611111111111in" height="3.8402777777777777in"}
 
+Figure 19: Example of inputs ancillary atmospheric data for a VGT sub-image.
+
 **Performance:**
 
 - GPU acceleration: \~100× faster than CPU for large images
@@ -1691,7 +1659,7 @@ The outputs of the SMAC-CL run routine are:
 
 - The standard deviation ${\mathbf{u}\left( \mathbf{R}_{\mathbf{toc}} \right)}_{\mathbf{ensemble}}$ due to aerosol models spread for each sensor channel *λ*
 
-An example of the outputs and Jacobians is given in Figure 18
+An example of the outputs and Jacobians is given in Figure 21
 
 ## Level 2A Output Variables
 
@@ -1705,17 +1673,27 @@ The standard outputs of AC module are:
 
   - Bit 0 : cloud \_contaminated (clm != 0)
 
-  - Bit 1 : High AOD (TOA \>= 0.6)
+  - Bit 1 : High AOD (max(TOA bands) \>= `aodmax`, default 0.6)
 
   - Bit 2 : High SZA (sza \> 80.)
 
-  - Bit 3 : High AOD gradient (aod_grad \> Threshold)
+  - Bit 3 : High AOD gradient (aod_grad \> `aodmax_grad`, default 1.4e-4)
 
   - Bit 4 : AC algorithm failure
 
   - Bit 5 : Missing auxiliary data
 
   - Bit 6 : Out of LUT range
+
+For implementation consistency, a single AOD threshold parameter `aodmax` is used in configuration and propagated to the SMAC-CL internal high-AOD threshold (`taot`) at runtime. Therefore, both the internal SMAC-CL high-AOD process flag and the project quality criterion use the same numerical limit.
+
+The gradient-based flag uses:
+
+$$aod\_grad = \sqrt{\left(\frac{\partial \tau_{a}^{550}}{\partial y}\right)^2 + \left(\frac{\partial \tau_{a}^{550}}{\partial x}\right)^2}$$
+
+and raises Bit 3 when:
+
+$$aod\_grad > aodmax\_grad$$
 
 TOC directional reflectances and Jacobians are direct outputs of the SMAC procedure (done in the GPU) while the [associated uncertainties are post-processed in the CPU]{.underline} as described in section 5.2. The quantities used are:
 
@@ -1910,12 +1888,12 @@ Standard outputs variables (TOC-reflectances and total associated uncertainties)
 **Quality Flags:**
 
 - Bit 0: Cloud-contaminated pixel
-- Bit 1: High AOD (\>0.8)
-- Bit 2: High SZA (\>70°)
-- Bit 3: High AOD gradient (AOD quality risks)
-- Bit 4: AC algorithm failure
-- Bit 5: Missing auxiliary data
-- Bit 6: Out-of-LUT range
+- Bit 1: High AOD (max(TOA bands) >= `aodmax`, default 0.6)
+- Bit 2: High SZA (SZA > `szamax`, default 80°)
+- Bit 3: High AOD gradient (`aod_grad` > `aodmax_grad`, default 1.4e-4)
+- Bit 4: AC algorithm failure (reserved in current implementation)
+- Bit 5: Missing auxiliary data (reserved in current implementation)
+- Bit 6: Out-of-LUT range (reserved in current implementation)
 
 **Global Attributes:**
 
@@ -1935,10 +1913,12 @@ This appendix documents implementation-specific details, performance optimizatio
 #| echo: false
 #| warning: false
 #| message: false
+#| include: false
 
 import configparser
 
 import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 import xarray as xr
@@ -1951,6 +1931,20 @@ def read_output_path(config_file="../fdr4vgt/probav_config.cfg"):
   cf = configparser.ConfigParser()
   cf.read(config_file)
   return cf["Paths"]["output"]
+
+
+def read_quality_thresholds(config_file="../fdr4vgt/probav_config.cfg"):
+  cf = configparser.ConfigParser()
+  cf.read(config_file)
+  coeffs = cf["Coefficients"]
+  aodmax = float(coeffs.get("aodmax", coeffs.get("aotmax", 0.6)))
+  szamax = float(coeffs.get("szamax", 80.0))
+  aodmax_grad = float(coeffs.get("aodmax_grad", coeffs.get("aod_max_grad", 1.4e-4)))
+  return {
+    "aodmax": aodmax,
+    "szamax": szamax,
+    "aodmax_grad": aodmax_grad,
+  }
 
 
 def open_output(nc_path):
@@ -1994,7 +1988,15 @@ def shared_limits(arrays, mask=None):
 
 
 nc_path = read_output_path()
+quality_thresholds = read_quality_thresholds()
+qf_aodmax = quality_thresholds["aodmax"]
+qf_szamax = quality_thresholds["szamax"]
+qf_aodmax_grad = quality_thresholds["aodmax_grad"]
 print("Output NetCDF:", nc_path)
+print(
+  f"Quality thresholds from cfg: aodmax={qf_aodmax:g}, "
+  f"szamax={qf_szamax:g}, aodmax_grad={qf_aodmax_grad:.2e}"
+)
 ds_full = open_output(nc_path)
 center = (3029, 646)
 print(f"Thumbnail centered at (row={center[0]}, col={center[1]}), size={THUMB_SIZE}x{THUMB_SIZE}")
@@ -2008,7 +2010,7 @@ imshow_panel(axes[2], thumb["water_vapor_column_used"], "Specific humidity", cma
 imshow_panel(axes[3], thumb["AOD_550_used"], "AOD @ 550 nm", cmap="jet", cbar_label="AOD")
 fig.suptitle(f"Ancillary atmospheric inputs ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=12)
 fig.savefig("figure36_ancillary_inputs.png", dpi=180, bbox_inches="tight")
-plt.show()
+plt.close(fig)
 
 jacobians = {
   "Rtoa": "Jacobian_Rtoc_vs_Rtoa_",
@@ -2038,7 +2040,7 @@ for i in range(len(panels), len(axes)):
   axes[i].axis("off")
 fig.suptitle(f"TOC reflectances and Jacobians ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=14)
 fig.savefig("figure37_rtoc_jacobians.png", dpi=180, bbox_inches="tight")
-plt.show()
+plt.close(fig)
 
 unc_components = {
   "Total": ("Rtoc_uncertainty_", "reflectance"),
@@ -2084,25 +2086,136 @@ for i in range(len(panels), len(axes)):
   axes[i].axis("off")
 fig.suptitle(f"Uncertainty components ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=14)
 fig.savefig("figure38_uncertainties.png", dpi=180, bbox_inches="tight")
-plt.show()
+plt.close(fig)
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 4.8), constrained_layout=True)
 # Quality flag: discrete colormap over full 7-bit range (0–127)
 qf_data = np.asarray(thumb["Quality_flag"]).astype(int)
 qf_mask = np.asarray(mask)
 qf_display = np.where(qf_mask, np.nan, qf_data)
-cmap_qf = plt.colormaps["tab20"].resampled(128)
-im_qf = axes[0].imshow(qf_display, cmap=cmap_qf, vmin=0, vmax=127, interpolation="nearest")
+# Build a strict 128-class discrete colormap (one color per bitfield value).
+hues = np.linspace(0.0, 1.0, 128, endpoint=False)
+cmap_qf = mcolors.ListedColormap(plt.cm.hsv(hues))
+norm_qf = mcolors.BoundaryNorm(np.arange(-0.5, 128.5, 1.0), cmap_qf.N)
+im_qf = axes[0].imshow(qf_display, cmap=cmap_qf, norm=norm_qf, interpolation="nearest")
 axes[0].set_title("Quality flag (bitfield, 0–127)", fontsize=9)
 axes[0].axis("off")
-cbar_qf = plt.colorbar(im_qf, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 128, 16))
+cbar_qf = plt.colorbar(im_qf, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 128, 8))
 cbar_qf.ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 cbar_qf.set_label("flag value", fontsize=8)
 imshow_panel(axes[1], thumb["AOD_550_used"], "AOD @ 550 nm used", cmap="jet", cbar_label="AOD")
 fig.suptitle(f"Quality flags and AOD@550 used ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=12)
 fig.savefig("figure39_flags_aod.png", dpi=180, bbox_inches="tight")
-plt.show()
+plt.close(fig)
+
+# Full-scene consistency view: same variables over entire scene.
+qf_full = ds_full["Quality_flag"].compute().values.astype(int)
+aod_full = ds_full["AOD_550_used"].compute().values.astype(float)
+mask_full = (ds_full["clm"].compute().values > 1e6)
+qf_full_display = np.where(mask_full, np.nan, qf_full)
+aod_full_display = np.where(mask_full, np.nan, aod_full)
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 5.2), constrained_layout=True)
+im_qf_full = axes[0].imshow(qf_full_display, cmap=cmap_qf, norm=norm_qf, interpolation="nearest")
+axes[0].set_title("Quality flag (full scene, bitfield 0–127)", fontsize=9)
+axes[0].axis("off")
+cbar_qf_full = plt.colorbar(im_qf_full, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 128, 8))
+cbar_qf_full.ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+cbar_qf_full.set_label("flag value", fontsize=8)
+
+im_aod_full = axes[1].imshow(aod_full_display, cmap="jet", interpolation="nearest")
+axes[1].set_title("AOD @ 550 nm used (full scene)", fontsize=9)
+axes[1].axis("off")
+cbar_aod_full = plt.colorbar(im_aod_full, ax=axes[1], fraction=0.046, pad=0.04)
+cbar_aod_full.set_label("AOD", fontsize=8)
+
+fig.suptitle("Full-scene quality flags and AOD@550 consistency view", fontsize=12)
+fig.savefig("figure40_fullscene_flags_aod.png", dpi=180, bbox_inches="tight")
+plt.close(fig)
+
+# Full-scene boolean maps: one panel per raised quality bit.
+bit_definitions = {
+  0: "Cloud contaminated (clm != 0)",
+  1: f"High AOD (max(TOA) >= aodmax={qf_aodmax:g})",
+  2: f"High SZA (SZA > szamax={qf_szamax:g}°)",
+  3: f"High AOD gradient (aod_grad > aodmax_grad={qf_aodmax_grad:.2e})",
+  4: "AC algorithm failure",
+  5: "Missing auxiliary data",
+  6: "Out-of-LUT range",
+}
+
+raised_bits = [bit for bit in range(7) if np.any((qf_full & (1 << bit)) != 0)]
+
+if raised_bits:
+  ncols = min(3, len(raised_bits))
+  nrows = int(np.ceil(len(raised_bits) / ncols))
+  fig, axes = plt.subplots(nrows, ncols, figsize=(5.2 * ncols, 4.8 * nrows), constrained_layout=True)
+  axes = np.atleast_1d(axes).ravel()
+
+  cmap_bool = mcolors.ListedColormap(["#f0f0f0", "#d62728"])
+  norm_bool = mcolors.BoundaryNorm([-0.5, 0.5, 1.5], cmap_bool.N)
+
+  total_px = qf_full.size
+  for i, bit in enumerate(raised_bits):
+    ax = axes[i]
+    bit_map = ((qf_full & (1 << bit)) != 0).astype(np.int8)
+    bit_count = int(bit_map.sum())
+    bit_pct = 100.0 * bit_count / total_px if total_px else 0.0
+
+    im = ax.imshow(bit_map, cmap=cmap_bool, norm=norm_bool, interpolation="nearest")
+    ax.set_title(f"Bit {bit}: {bit_definitions.get(bit, 'Reserved')}\nRaised: {bit_count:,} px ({bit_pct:.2f}%)", fontsize=9)
+    ax.axis("off")
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, ticks=[0, 1])
+    cbar.ax.set_yticklabels(["False", "True"])
+    cbar.set_label("bit raised", fontsize=8)
+
+  for i in range(len(raised_bits), len(axes)):
+    axes[i].axis("off")
+
+  fig.suptitle("Full-scene boolean maps for raised quality-flag bits", fontsize=12)
+  fig.savefig("figure41_fullscene_quality_bits_boolean.png", dpi=180, bbox_inches="tight")
+  plt.close(fig)
+
+  # Optional per-bit standalone exports for document assembly/debugging.
+  for bit in raised_bits:
+    bit_map = ((qf_full & (1 << bit)) != 0).astype(np.int8)
+    bit_count = int(bit_map.sum())
+    bit_pct = 100.0 * bit_count / total_px if total_px else 0.0
+
+    fig, ax = plt.subplots(1, 1, figsize=(7.0, 5.6), constrained_layout=True)
+    im = ax.imshow(bit_map, cmap=cmap_bool, norm=norm_bool, interpolation="nearest")
+    ax.set_title(f"Bit {bit}: {bit_definitions.get(bit, 'Reserved')}\nRaised: {bit_count:,} px ({bit_pct:.2f}%)", fontsize=10)
+    ax.axis("off")
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, ticks=[0, 1])
+    cbar.ax.set_yticklabels(["False", "True"])
+    cbar.set_label("bit raised", fontsize=8)
+    fig.savefig(f"figure41_fullscene_quality_bit{bit}.png", dpi=180, bbox_inches="tight")
+    plt.close(fig)
 ```
+
+![](figure36_ancillary_inputs.png)
+
+Figure 20: Ancillary atmospheric inputs for a 50x50 thumbnail (surface pressure, ozone, water vapor and AOD\@550).
+
+![](figure37_rtoc_jacobians.png)
+
+Figure 21: TOC reflectances and Jacobians for the 50x50 thumbnail.
+
+![](figure38_uncertainties.png)
+
+Figure 22: Uncertainty components for the 50x50 thumbnail.
+
+![](figure39_flags_aod.png)
+
+Figure 23: Quality flag map and AOD\@550 used over the 50x50 thumbnail. The quality flag panel uses a strict 128-class discrete colormap (0-127).
+
+![](figure40_fullscene_flags_aod.png)
+
+Figure 24: Quality flag map and AOD\@550 used over the full scene. This view is used to check consistency between quality-flag bits and configured thresholds (`aodmax`, `aodmax_grad`).
+
+![](figure41_fullscene_quality_bits_boolean.png)
+
+Figure 25: Full-scene boolean maps for each raised quality-flag bit. Each panel shows where the corresponding bit is raised over the whole scene; Bit 1/2/3 criteria are tied to configured thresholds (`aodmax`, `szamax`, `aodmax_grad`).
 
 The figures above replace the static screenshots in the previous ATBD version.
 
@@ -2132,81 +2245,81 @@ Cache format: Zarr format 2. Most fields are stored as float16 (small values, su
 
 ### Tile-Based Processing
 
-+------------------+-------------------------------------------------------------------------------------------+
-| Aspect           | Description                                                                               |
-+==================+===========================================================================================+
-| What             | Processes the image in overlapping tiles (`batch_size` × `batch_size` with a halo)        |
-+------------------+-------------------------------------------------------------------------------------------+
-| Why              | Bounded memory per tile, parallel processing across workers                               |
-+------------------+-------------------------------------------------------------------------------------------+
-| Function         | `process_batched()` generates the tile grid; `_worker_compute_tile()` processes each tile |
-+------------------+-------------------------------------------------------------------------------------------+
-| Config           | `[Sizes] chunks_size` (default 512), `[Sizes] nworkers` (default 1)                       |
-+------------------+-------------------------------------------------------------------------------------------+
-| Halo             | ±1 pixel halo for terrain slope/aspect computation (edge effects)                         |
-+------------------+-------------------------------------------------------------------------------------------+
++------------+-------------------------------------------------------------------------------------------+
+| Aspect     | Description                                                                               |
++============+===========================================================================================+
+| What       | Processes the image in overlapping tiles (`batch_size` × `batch_size` with a halo)        |
++------------+-------------------------------------------------------------------------------------------+
+| Why        | Bounded memory per tile, parallel processing across workers                               |
++------------+-------------------------------------------------------------------------------------------+
+| Function   | `process_batched()` generates the tile grid; `_worker_compute_tile()` processes each tile |
++------------+-------------------------------------------------------------------------------------------+
+| Config     | `[Sizes] chunks_size` (default 512), `[Sizes] nworkers` (default 1)                       |
++------------+-------------------------------------------------------------------------------------------+
+| Halo       | ±1 pixel halo for terrain slope/aspect computation (edge effects)                         |
++------------+-------------------------------------------------------------------------------------------+
 
 : Tile-based processing optimization
 
 ### Local Output File
 
-+----------------+------------------------------------------------------------------------------------------------------------+
-| Aspect         | Description                                                                                                |
-+================+============================================================================================================+
-| What           | Writes the output NetCDF to a local temporary file, then moves it to the final destination once at the end |
-+----------------+------------------------------------------------------------------------------------------------------------+
-| Why            | Serial per-tile append writes degrade badly on network storage (Ceph): \~2 s → \~5 s per tile              |
-+----------------+------------------------------------------------------------------------------------------------------------+
-| Function       | `process_batched()` creates a temp file, `shutil.move()` at the end                                        |
-+----------------+------------------------------------------------------------------------------------------------------------+
-| Toggle         | `[Sizes] local_output` (default on)                                                                        |
-+----------------+------------------------------------------------------------------------------------------------------------+
++-----------+------------------------------------------------------------------------------------------------------------+
+| Aspect    | Description                                                                                                |
++===========+============================================================================================================+
+| What      | Writes the output NetCDF to a local temporary file, then moves it to the final destination once at the end |
++-----------+------------------------------------------------------------------------------------------------------------+
+| Why       | Serial per-tile append writes degrade badly on network storage (Ceph): \~2 s → \~5 s per tile              |
++-----------+------------------------------------------------------------------------------------------------------------+
+| Function  | `process_batched()` creates a temp file, `shutil.move()` at the end                                        |
++-----------+------------------------------------------------------------------------------------------------------------+
+| Toggle    | `[Sizes] local_output` (default on)                                                                        |
++-----------+------------------------------------------------------------------------------------------------------------+
 
 : Local output file optimization
 
 ### Single NetCDF Handle
 
-+---------------------+---------------------------------------------------------------------------+
-| Aspect              | Description                                                               |
-+=====================+===========================================================================+
-| What                | Opens the output NetCDF handle once and reuses it for all tiles           |
-+---------------------+---------------------------------------------------------------------------+
-| Why                 | Per-tile open/close/flush was the dominant writer cost (HDF5 overhead)    |
-+---------------------+---------------------------------------------------------------------------+
-| Function            | `nc_out = Dataset(output_path, 'a')` reused across tiles                  |
-+---------------------+---------------------------------------------------------------------------+
-| Flush               | Periodic close+reopen every `flush_interval` tiles to free the HDF5 cache |
-+---------------------+---------------------------------------------------------------------------+
++--------------+---------------------------------------------------------------------------+
+| Aspect       | Description                                                               |
++==============+===========================================================================+
+| What         | Opens the output NetCDF handle once and reuses it for all tiles           |
++--------------+---------------------------------------------------------------------------+
+| Why          | Per-tile open/close/flush was the dominant writer cost (HDF5 overhead)    |
++--------------+---------------------------------------------------------------------------+
+| Function     | `nc_out = Dataset(output_path, 'a')` reused across tiles                  |
++--------------+---------------------------------------------------------------------------+
+| Flush        | Periodic close+reopen every `flush_interval` tiles to free the HDF5 cache |
++--------------+---------------------------------------------------------------------------+
 
 : Single NetCDF handle optimization
 
 ### DEM Cropping
 
-+--------------------+--------------------------------------------------------------------------------+
-| Aspect             | Description                                                                    |
-+====================+================================================================================+
-| What               | Crops the global GTOPO30 DEM to the product's lat/lon extent before loading    |
-+--------------------+--------------------------------------------------------------------------------+
-| Why                | Full DEM is \~1.9 GB; cropped is \~0.2 GB for a typical narrow longitude range |
-+--------------------+--------------------------------------------------------------------------------+
-| Function           | `xrcrop(dem_ds, lat=data['y'], lon=data['x'])`                                 |
-+--------------------+--------------------------------------------------------------------------------+
++-------------+--------------------------------------------------------------------------------+
+| Aspect      | Description                                                                    |
++=============+================================================================================+
+| What        | Crops the global GTOPO30 DEM to the product's lat/lon extent before loading    |
++-------------+--------------------------------------------------------------------------------+
+| Why         | Full DEM is \~1.9 GB; cropped is \~0.2 GB for a typical narrow longitude range |
++-------------+--------------------------------------------------------------------------------+
+| Function    | `xrcrop(dem_ds, lat=data['y'], lon=data['x'])`                                 |
++-------------+--------------------------------------------------------------------------------+
 
 : DEM cropping optimization
 
 ### Copy-on-Write Shared State
 
-+------------------+------------------------------------------------------------------------------------------+
-| Aspect           | Description                                                                              |
-+==================+==========================================================================================+
-| What             | Pre-forks the worker pool, then populates a `_SHARED` dict (inherited via copy-on-write) |
-+------------------+------------------------------------------------------------------------------------------+
-| Why              | Avoids re-pickling large objects (SMAC coefficients, DEM, MERRA-2 cache) for every task  |
-+------------------+------------------------------------------------------------------------------------------+
-| Function         | `_SHARED.update()` executed before the pool is created                                   |
-+------------------+------------------------------------------------------------------------------------------+
-| Objects          | SMAC coefficients (\~100 MB), aerosol model LUT, terrain data                            |
-+------------------+------------------------------------------------------------------------------------------+
++-------------+------------------------------------------------------------------------------------------+
+| Aspect      | Description                                                                              |
++=============+==========================================================================================+
+| What        | Pre-forks the worker pool, then populates a `_SHARED` dict (inherited via copy-on-write) |
++-------------+------------------------------------------------------------------------------------------+
+| Why         | Avoids re-pickling large objects (SMAC coefficients, DEM, MERRA-2 cache) for every task  |
++-------------+------------------------------------------------------------------------------------------+
+| Function    | `_SHARED.update()` executed before the pool is created                                   |
++-------------+------------------------------------------------------------------------------------------+
+| Objects     | SMAC coefficients (\~100 MB), aerosol model LUT, terrain data                            |
++-------------+------------------------------------------------------------------------------------------+
 
 : Copy-on-write shared state optimization
 
@@ -2214,23 +2327,23 @@ Cache format: Zarr format 2. Most fields are stored as float16 (small values, su
 
 ### Float32 for SLP/T10M (Overflow Fix)
 
-+------------------+-----------------------------------------------------------------------------------------------+
-| Aspect           | Description                                                                                   |
-+==================+===============================================================================================+
-| Issue            | The ancillary Zarr cache stored `T10M` and `SLP` as float16                                   |
-+------------------+-----------------------------------------------------------------------------------------------+
-| Root cause       | `smaccl.c3s_lib.Ps()` computes `log(R·T)` where $R\cdot T = 287.058 \times 290 \approx 83246$ |
-+------------------+-----------------------------------------------------------------------------------------------+
-| Overflow         | 83246 exceeds the float16 max (65504) → NaN in the pressure correction → NaN `Rtoc`           |
-+------------------+-----------------------------------------------------------------------------------------------+
-| Fix              | `_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}` keeps these two fields as float32               |
-+------------------+-----------------------------------------------------------------------------------------------+
-| Commit           | `51f7e68` — "Fix ancillary cache dtype overflow causing NaN rTOC"                             |
-+------------------+-----------------------------------------------------------------------------------------------+
++------------+-----------------------------------------------------------------------------------------------+
+| Aspect     | Description                                                                                   |
++============+===============================================================================================+
+| Issue      | The ancillary Zarr cache stored `T10M` and `SLP` as float16                                   |
++------------+-----------------------------------------------------------------------------------------------+
+| Root cause | `smaccl.c3s_lib.Ps()` computes `log(R·T)` where $R\cdot T = 287.058 \times 290 \approx 83246$ |
++------------+-----------------------------------------------------------------------------------------------+
+| Overflow   | 83246 exceeds the float16 max (65504) → NaN in the pressure correction → NaN `Rtoc`           |
++------------+-----------------------------------------------------------------------------------------------+
+| Fix        | `_MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}` keeps these two fields as float32               |
++------------+-----------------------------------------------------------------------------------------------+
+| Commit     | `51f7e68` — "Fix ancillary cache dtype overflow causing NaN rTOC"                             |
++------------+-----------------------------------------------------------------------------------------------+
 
 : Float32 overflow fix for SLP/T10M
 
-Validation: a full processing run (100 tiles, 241.9 s) shows `Rtoc` finite on land for \~77.2% of pixels and \~0% over ocean (expected, since ocean pixels are masked by cloud/quality flags).
+Validation (latest PROBA-V run, `probav_config.cfg`): 80 tiles were processed in 120.0 s (1.50 s/tile), with ancillary precompute in 94.0 s, NetCDF copy in 5.8 s, and peak RSS 3511 MB (1 worker, PoCL CPU backend). On the generated output (`Rtoc_B1`), finite values are 24.59% over all land pixels and 0.00% over ocean pixels.
 
 ### Float16 for Small-Value Fields
 
@@ -2256,7 +2369,7 @@ Future work: implement a semi-empirical adjacency correction (e.g. based on scen
 
 Status: **Implemented.**
 
-The AOD uncertainty model (Section 5.3.5, Eq. before Table 6) uses a global base relation scaled by regional multipliers derived from Köppen-Geiger climate classes. Multipliers are applied to `Dtaup` before uncertainty propagation in `compute_urtoc()`:
+The AOD uncertainty model (Section 5.3.5, equation definition) uses a global base relation scaled by regional multipliers derived from Köppen-Geiger climate classes. Multipliers are applied to `Dtaup` before uncertainty propagation in `compute_urtoc()`:
 
 | Region Type          | Multiplier | Example Locations          |
 |----------------------|------------|----------------------------|
