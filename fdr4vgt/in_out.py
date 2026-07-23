@@ -187,8 +187,7 @@ def attrs_corr(attr):
     return attr
 
 #@memory_tracker
-#def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False): #, debug=False):  
-def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False): 
+def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False, debug=False):
     '''
     Save a batch of data to a NetCDF file.
     out : an open netCDF4 Dataset, OR a filename string. When a filename is
@@ -197,6 +196,8 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
           (keeping the handle open across tiles avoids 100x HDF5 open/close).
     ds_in : xarray.Dataset containing input datk
     ds_out : xarray.Dataset containing output data
+    debug : if True, also save terrain diagnostic variables (slope in degrees,
+            elevation, delta-elevation) used to compute uncertainty_from_terrain.
     '''
 
     close_after = False
@@ -216,6 +217,10 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
     x_end = min(x_start + band_size, out.dimensions['width'].size)
     y_start = iband * band_size
     y_end = min(y_start + band_size, out.dimensions['height'].size)
+    # HDF5 chunk shape cannot exceed the dimension size (fails on grids narrower
+    # or shorter than one tile, e.g. edge strips like X08Y00 width=370 < 512).
+    chunk_h = min(band_size, out.dimensions['height'].size)
+    chunk_w = min(band_size, out.dimensions['width'].size)
 
 #    list_vars_out = ['rTOC', 'UrTOC', 'flag']
     list_vars_out = {'Rtoc_': 'rTOC', 'Rtoc_uncertainty_': 'UrTOC', 'uncertainty_from_RTM_terrain_':'urtoc_terrain', 'Quality_flag': 'flag'}
@@ -230,6 +235,11 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
         list_vars_in = {**list_vars_in, **{'uncertainty_from_TOA_':'ERROR'}}
     list_vars_out = {**list_vars_out, **{'aerosol_model_index':'iaero'}}
     list_vars_in = {**list_vars_in, **{'AOD_550_used': 'TOTEXTTAU', 'ozone_column_used': 'TO3', 'water_vapor_column_used': 'TQV', 'surface_pressure_used': 'SLP'}}
+    if debug:
+        # Terrain diagnostics behind uncertainty_from_terrain, only saved when
+        # requested (config [Options] debug=True) since they duplicate the DEM.
+        list_vars_out = {**list_vars_out, **{'terrain_slope_degrees': 'slope_deg'}}
+        list_vars_in = {**list_vars_in, **{'terrain_elevation_m': 'elev', 'terrain_delta_elevation_m': 'Delev'}}
 
     # global attributes
     out.setncatts(ds_out.attrs)
@@ -240,7 +250,7 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
 #            if var not in out.variables.keys():
             if var not in existing_vars:
                 dtype = ds_in[var].dtype
-                out.createVariable(var, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(band_size, band_size))
+                out.createVariable(var, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(chunk_h, chunk_w))
                 existing_attrs = ds_in[var].attrs if hasattr(ds_in[var], 'attrs') else {}
                 out[var].setncatts({**existing_attrs})
 #            out.variables[var][y_start:y_end,:] = ds_in[var].values
@@ -253,7 +263,7 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
 #                if var_out_band not in out.variables.keys():
                 if var_out_band not in existing_vars:
                     dtype = ds_out[var_in].dtype
-                    out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(band_size, band_size))
+                    out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(chunk_h, chunk_w))
                     existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
                     out[var_out_band].setncatts({**existing_attrs})
 #                out.variables[var_out_band][y_start:y_end, :] = ds_out[var_in][ib, :, :].values
@@ -261,7 +271,7 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
         elif len(ds_out[var_in].dims) == 2:
             if var_out not in existing_vars:
                 dtype = ds_out[var_in].dtype
-                out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(band_size, band_size))
+                out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(chunk_h, chunk_w))
                 existing_attrs = ds_out[var_in].attrs if hasattr(ds_out[var_in], 'attrs') else {}
                 out[var_out].setncatts({**existing_attrs})
 #            out.variables[var_out][y_start:y_end, :] = ds_out[var_in].values
@@ -274,7 +284,7 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
                 var_out_band = '{}B{}'.format(var_out, ib+1)
                 if var_out_band not in existing_vars:
                     dtype = ds_in[var_in].dtype
-                    out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(band_size, band_size))
+                    out.createVariable(var_out_band, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(chunk_h, chunk_w))
                     existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}
                     out[var_out_band].setncatts({**existing_attrs})
 #                out.variables[var_out_band][y_start:y_end, :] = ds_in[var_in][ib, :, :].values
@@ -282,7 +292,7 @@ def save_nc_batch(out, ds_in, ds_out, iband, jband, band_size, error=False):
         elif len(ds_in[var_in].dims) == 2:
             if var_out not in existing_vars:
                 dtype = ds_in[var_in].dtype
-                out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(band_size, band_size))
+                out.createVariable(var_out, dtype, ('height','width'), zlib=True, complevel=1, chunksizes=(chunk_h, chunk_w))
                 existing_attrs = ds_in[var_in].attrs if hasattr(ds_in[var_in], 'attrs') else {}
                 existing_attrs = attrs_corr(existing_attrs)
                 out[var_out].setncatts({**existing_attrs})

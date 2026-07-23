@@ -1,8 +1,8 @@
 ---
 title: "FDR4VGT Atmospheric Correction"
-subtitle: "Algorithm Theoretical Basis Document (v1.1)"
-version: "1.1"
-reference: FDR4VGT-processing-AC-ATBD_v1.1
+subtitle: "Algorithm Theoretical Basis Document (v1.2)"
+version: "1.2"
+reference: FDR4VGT-processing-AC-ATBD_v1.2
 client: ESA
 contrat: FDR4VGT_XXXXXX
 date: today
@@ -32,9 +32,9 @@ fontsize: 11pt
 ## Atmospheric Correction ATBD {.unnumbered .unlisted}
 
 **Date Issued:** 23.07.2026\
-**Issue:** I1.1
+**Issue:** I1.2
 
-> Ref: FDR4VGT-processing-AC-ATBD_v1.1
+> Ref: FDR4VGT-processing-AC-ATBD_v1.2
 >
 > Contract No : FDR4VGT_XXXXXX
 
@@ -52,6 +52,8 @@ History of modifications
 | V1.0        | 15/01/2026 | Draft Initial version             | All                                                                                                         |
 +-------------+------------+-----------------------------------+-------------------------------------------------------------------------------------------------------------+
 | V1.1        | 17/07/2026 | Implementation notes, performance | optimizations, float32 overflow fix, known limitations, SMACCL OpenCL kernel API New Appendix D, Appendix E |
++-------------+------------+-----------------------------------+-------------------------------------------------------------------------------------------------------------+
+| V1.2        | 23/07/2026 | AOD gradient halo detection (Bit 3| quality flag), debug=True terrain diagnostics, HDF5 chunksize edge-tile fix. New Appendix F              |
 +-------------+------------+-----------------------------------+-------------------------------------------------------------------------------------------------------------+
 
 Related documents
@@ -264,6 +266,15 @@ This v1.1 revision keeps the full v1.0 content below **unchanged** and adds the 
 - **Appendix E: SMACCL OpenCL Kernel API** — the Python host wrapper API (`Smaccl.run`), the OpenCL kernel signature (`devicecl.cl`), the output variable mapping, and the `ISmaccl` product-level wrapper API, as implemented in the HYGEOS `smaccl` repository.
 - A **critical bug-fix note** on surface pressure computation: `SLP` and `T10M` must be stored as float32 (not float16) in the ancillary cache to avoid overflow in `log(R·T)` (see Appendix D.2 and the note under Effect 4: Surface Pressure Uncertainty).
 - Confirmation that **DEM interpolation** uses linear interpolation (an improvement over the nearest-neighbor method originally specified), and that **adjacency effects** and **Köppen-Geiger regionalization** are, respectively, a known limitation and a planned feature.
+
+## What's New in v1.2
+
+This v1.2 revision keeps the full v1.0/v1.1 content below **unchanged** and adds the following new material:
+
+- **Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix** — a two-stage risk mask (Seed OR (Dilated Seed AND Guard)) replacing the single-threshold AOD-gradient criterion for quality-flag Bit 3, the `debug=True` terrain diagnostic output variables, and the HDF5 chunksize clamp fix for narrow edge tiles.
+- An **enhancement note** on quality-flag Bit 3 (High AOD gradient): MERRA AOD high-value thresholding alone leaves gradient "halos" around high-AOD pixels that are under-flagged at their core; the implementation now supports a native-MERRA-grid gradient source, a robust (median/MAD-based) threshold option, and an optional morphological dilation+guard step. See Appendix F.1 and the note under Effect/Bit 3 in the Level 2A Output Variables section.
+- A **new `debug` configuration option** ([Options] `debug`, default `False`) that adds three diagnostic output variables — `terrain_slope_degrees`, `terrain_elevation_m`, `terrain_delta_elevation_m` — to help diagnose terrain-uncertainty behavior. See Appendix F.2.
+- A **bug-fix note** on `save_nc_batch` (in_out.py): HDF5 chunk sizes are now clamped to the tile's actual height/width, fixing a `ValueError: chunksize cannot exceed dimension size` crash on narrow edge tiles smaller than the configured chunk size. See Appendix F.3.
 
 # Input and Auxiliary Data
 
@@ -930,7 +941,7 @@ In the baseline run, the surface is supposed to be lambertian (in that case${\ k
 
 Difference in R~toc~ from the two runs gives an estimation of the BRDF effects.
 
-$u\left( R_{toc}^{j} \right)_{RTM\_BRDF} = \left( {\ k}_{1}^{p}=0,k_{2}^{p} =0 \right) - \left( {\ k}_{1}^{p} \neq 0, k_{2}^{p} \neq 0 \right)$
+$u\left( R_{toc}^{j} \right)_{RTM\_BRDF} = \left|\left( {\ k}_{1}^{p}=0,k_{2}^{p} =0 \right) - \left( {\ k}_{1}^{p} \neq 0, k_{2}^{p} \neq 0 \right)\right|$
 
 +--------------+---------------------------------------+-------------------------------------+
 | Descriptor   | Value                                 | Notes                               |
@@ -991,7 +1002,7 @@ T_{dir} \cdot \max\left(0,\frac{\mu_{i}}{\mu_{s}}\right)
 
 with the direct term explicitly set to zero for terrain facets facing away from the sun ($\mu_i \le 0$), so it never contributes a negative correction.
 
-- ${u\left( R_{toc}^{j} \right)}_{RTM - slope} = R_{toc}^{j}*(slope_{eff} - 1)$
+- ${u\left( R_{toc}^{j} \right)}_{RTM - slope} = \left|R_{toc}^{j}*(slope_{eff} - 1)\right|$
 
 Where:
 
@@ -1695,6 +1706,8 @@ and raises Bit 3 when:
 
 $$aod\_grad > aodmax\_grad$$
 
+> **Implementation Note (v1.2):** MERRA AOD high-value thresholding alone leaves gradient "halos" of too-high `Rtoc` around high-AOD pixels, since the strongest gradient is often only at the halo edge, not the core. The implementation therefore supports an enhanced, two-stage risk mask for Bit 3: `Bit3 = Seed OR (DilatedSeed AND Guard)`, where Seed is the `aod_grad > aodmax_grad` criterion above (optionally on a robust median/MAD-based threshold instead of a fixed one), DilatedSeed is a morphological dilation (+ optional closing) of Seed to catch adjacent halo-ring pixels, and Guard requires a moderate relative gradient or elevated relative AOD to prevent overgrowth. See Appendix F.1 for the configuration knobs and validation results.
+
 TOC directional reflectances and Jacobians are direct outputs of the SMAC procedure (done in the GPU) while the [associated uncertainties are post-processed in the CPU]{.underline} as described in section 5.2. The quantities used are:
 
 - The Jacobians $\mathbf{J}_{\mathbf{R}_{\mathbf{toc}}}^{\mathbf{R}_{\mathbf{toa}}}\mathbf{,\ }\mathbf{J}_{\mathbf{R}_{\mathbf{toc}}}^{\mathbf{U}_{\mathbf{O}_{\mathbf{3}}}}\mathbf{,\ }\mathbf{J}_{\mathbf{R}_{\mathbf{toc}}}^{\mathbf{U}_{\mathbf{H}_{\mathbf{2}}\mathbf{O}}}\mathbf{,\ }\mathbf{J}_{\mathbf{R}_{\mathbf{toc}}}^{\mathbf{U}_{\mathbf{P}_{\mathbf{S}}}}\mathbf{\ ,\ }\mathbf{J}_{\mathbf{R}_{\mathbf{toc}}}^{\mathbf{\tau}_{\mathbf{a}}^{\mathbf{550}}}$
@@ -1888,9 +1901,9 @@ Standard outputs variables (TOC-reflectances and total associated uncertainties)
 **Quality Flags:**
 
 - Bit 0: Cloud-contaminated pixel
-- Bit 1: High AOD (max(TOA bands) >= `aodmax`, default 0.6)
-- Bit 2: High SZA (SZA > `szamax`, default 80°)
-- Bit 3: High AOD gradient (`aod_grad` > `aodmax_grad`, default 1.4e-4)
+- Bit 1: High AOD (max(TOA bands) \>= `aodmax`, default 0.6)
+- Bit 2: High SZA (SZA \> `szamax`, default 80°)
+- Bit 3: High AOD gradient — two-stage risk mask `Seed OR (DilatedSeed AND Guard)` (v1.2, see Appendix F.1); Seed is `aod_grad` \> `aodmax_grad` (default 1.4e-4, fixed or robust threshold)
 - Bit 4: AC algorithm failure (reserved in current implementation)
 - Bit 5: Missing auxiliary data (reserved in current implementation)
 - Bit 6: Out-of-LUT range (reserved in current implementation)
@@ -2279,17 +2292,17 @@ Cache format: Zarr format 2. Most fields are stored as float16 (small values, su
 
 ### Single NetCDF Handle
 
-+--------------+---------------------------------------------------------------------------+
-| Aspect       | Description                                                               |
-+==============+===========================================================================+
-| What         | Opens the output NetCDF handle once and reuses it for all tiles           |
-+--------------+---------------------------------------------------------------------------+
-| Why          | Per-tile open/close/flush was the dominant writer cost (HDF5 overhead)    |
-+--------------+---------------------------------------------------------------------------+
-| Function     | `nc_out = Dataset(output_path, 'a')` reused across tiles                  |
-+--------------+---------------------------------------------------------------------------+
-| Flush        | Periodic close+reopen every `flush_interval` tiles to free the HDF5 cache |
-+--------------+---------------------------------------------------------------------------+
++-------------+---------------------------------------------------------------------------+
+| Aspect      | Description                                                               |
++=============+===========================================================================+
+| What        | Opens the output NetCDF handle once and reuses it for all tiles           |
++-------------+---------------------------------------------------------------------------+
+| Why         | Per-tile open/close/flush was the dominant writer cost (HDF5 overhead)    |
++-------------+---------------------------------------------------------------------------+
+| Function    | `nc_out = Dataset(output_path, 'a')` reused across tiles                  |
++-------------+---------------------------------------------------------------------------+
+| Flush       | Periodic close+reopen every `flush_interval` tiles to free the HDF5 cache |
++-------------+---------------------------------------------------------------------------+
 
 : Single NetCDF handle optimization
 
@@ -2309,17 +2322,17 @@ Cache format: Zarr format 2. Most fields are stored as float16 (small values, su
 
 ### Copy-on-Write Shared State
 
-+-------------+------------------------------------------------------------------------------------------+
-| Aspect      | Description                                                                              |
-+=============+==========================================================================================+
-| What        | Pre-forks the worker pool, then populates a `_SHARED` dict (inherited via copy-on-write) |
-+-------------+------------------------------------------------------------------------------------------+
-| Why         | Avoids re-pickling large objects (SMAC coefficients, DEM, MERRA-2 cache) for every task  |
-+-------------+------------------------------------------------------------------------------------------+
-| Function    | `_SHARED.update()` executed before the pool is created                                   |
-+-------------+------------------------------------------------------------------------------------------+
-| Objects     | SMAC coefficients (\~100 MB), aerosol model LUT, terrain data                            |
-+-------------+------------------------------------------------------------------------------------------+
++------------+------------------------------------------------------------------------------------------+
+| Aspect     | Description                                                                              |
++============+==========================================================================================+
+| What       | Pre-forks the worker pool, then populates a `_SHARED` dict (inherited via copy-on-write) |
++------------+------------------------------------------------------------------------------------------+
+| Why        | Avoids re-pickling large objects (SMAC coefficients, DEM, MERRA-2 cache) for every task  |
++------------+------------------------------------------------------------------------------------------+
+| Function   | `_SHARED.update()` executed before the pool is created                                   |
++------------+------------------------------------------------------------------------------------------+
+| Objects    | SMAC coefficients (\~100 MB), aerosol model LUT, terrain data                            |
++------------+------------------------------------------------------------------------------------------+
 
 : Copy-on-write shared state optimization
 
@@ -2618,5 +2631,96 @@ This extends the kernel outputs by including uncertainty-input terms (`D*`) comp
 :::
 
 If no compatible/available device is found, initialization fails.
+
+# Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix (NEW in v1.2)
+
+This appendix documents three implementation changes made after v1.1: an enhanced two-stage detection scheme for quality-flag Bit 3 (High AOD gradient), an optional `debug` mode adding terrain-diagnostic output variables, and a bug fix for HDF5 chunk sizing on narrow edge tiles. As with Appendix D, these are engineering/implementation refinements and do not change the underlying AC physics described in Sections 1-10.
+
+## F.1 AOD Gradient Halo Detection (Quality-Flag Bit 3)
+
+**Motivation:** thresholding the MERRA AOD gradient at a single fixed value is often insufficient on its own. High-AOD plumes typically leave a "halo" of overestimated `Rtoc` around them, and the strongest AOD gradient is frequently found only at the edge of the halo, not at its core — so a pure gradient threshold under-flags the core and can miss halo pixels just below threshold. This is consistent with the aerosol-mask thresholding guidance in the PROBA-V C2 technical note on AOT masks (`PROBA-V_C2_TN_AOT_masks_V1.0.pdf`).
+
+**Design:** Bit 3 is raised by a two-stage risk mask:
+
+$$Bit3 = Seed \lor (DilatedSeed \land Guard)$$
+
+- **Seed** — the existing gradient criterion, $aod\_grad > aodmax\_grad$ (Section "Level 2A Output Variables"), with two threshold variants:
+  - *fixed*: a constant `aodmax_grad` (default 1.4e-4).
+  - *robust*: $\max(floor,\ median + k \cdot 1.4826 \cdot MAD,\ quantile(q))$, computed on the AOD-gradient field, which adapts to the local/scene noise level instead of a single global constant.
+- **Dilated Seed** — a morphological dilation (with an optional closing) of the Seed mask, to catch adjacent halo-ring pixels that fall below the Seed threshold.
+- **Guard** — prevents the dilation from over-growing the flagged area; requires either a moderate gradient (relative to `aodmax_grad`) or an elevated interpolated AOD (relative to a threshold), so that dilated pixels are only kept where there is still supporting evidence of aerosol contamination.
+
+**Implementation:** `build_flag()` in [fdr4vgt/funcs.py](../fdr4vgt/funcs.py) computes the mask; the AOD gradient is computed on the native MERRA-2 grid and then interpolated to the sensor grid by `interp_merra_native_aod_grad()` in [fdr4vgt/process.py](../fdr4vgt/process.py) (as an alternative to the legacy path of interpolating AOD first and then differencing on the sensor grid).
+
+**Configuration knobs** (`[Coefficients]` section, `fdr4vgt/spotvgt1_config.cfg` and `fdr4vgt/probav_config.cfg`):
+
+| Parameter                                | Meaning                                                            | Recommended default |
+|-------------------------------------------|---------------------------------------------------------------------|----------------------|
+| `aod_grad_source`                        | `merra_native` (compute gradient on native MERRA-2 grid) or `legacy` (interpolated AOD, then gradient) | `merra_native`       |
+| `aod_grad_threshold_method`              | `fixed` or `robust`                                                | `robust`             |
+| `aod_grad_robust_k`                      | Robust threshold MAD multiplier *k*                                | `3.0`                |
+| `aod_grad_robust_quantile`               | Robust threshold quantile *q*                                      | `0.98`               |
+| `aod_grad_morph_enable`                  | Enable dilation/closing + guard                                    | `True`               |
+| `aod_grad_morph_radius_px`               | Dilation structuring-element radius (pixels)                       | `1`                  |
+| `aod_grad_morph_closing_radius_px`       | Morphological closing radius (pixels)                               | `1`                  |
+| `aod_grad_morph_guard_rel`               | Guard: gradient threshold, relative to `aodmax_grad`                | `0.5`                |
+| `aod_grad_morph_aod_rel`                 | Guard: AOD threshold, relative to a reference AOD level             | `0.8`                |
+
+: AOD gradient halo detection configuration knobs
+
+**Validation (A/B on a 4-tile SPOTVGT1 scene, 23,573,781 px, morphology disabled):**
+
+| Configuration                              | Bit 3 flagged fraction |
+|---------------------------------------------|------------------------|
+| Baseline (interpolated AOD, fixed threshold) | 2.433%                 |
+| Native MERRA grid, fixed threshold           | 3.312% (+36% vs. baseline) |
+| Interpolated AOD, robust threshold           | 0.005%                 |
+| Native MERRA grid, robust (k=6, q=0.995)     | 0.000% (too conservative) |
+
+: AOD gradient source/threshold A/B comparison
+
+The overly conservative robust(k=6, q=0.995) result led to retuning the recommended default to `robust_k=3.0`, `robust_quantile=0.98` (native MERRA grid), which is the default listed above.
+
+**Full-scene validation runs** (native MERRA grid + robust k=3.0/q=0.98 threshold):
+
+| Scene                       | Morphology | Bit 3 flagged             | Percentage |
+|------------------------------|------------|---------------------------|------------|
+| PROBA-V (80 tiles)            | Disabled   | 32,905 / 19,655,757        | 0.167%     |
+| PROBA-V (80 tiles)            | Enabled (radius=1, closing=1, guard_rel=0.5, aod_rel=0.8) | 36,616 / 19,655,757 | 0.186% (+11.3%) |
+| SPOTVGT1 (100 tiles)          | Disabled   | 20,233 / 23,573,781        | 0.086%     |
+| SPOTVGT1 (100 tiles)          | Enabled (radius=1, closing=1, guard_rel=0.5, aod_rel=0.8) | 22,960 / 23,573,781 | 0.097% (+13.5%) |
+
+: Full-scene Bit 3 flagged-fraction results, before/after morphology
+
+Enabling morphology increases the flagged fraction by a modest, bounded ~11-14% (as expected from a 1-pixel dilation/closing plus the guard condition, rather than unconstrained growth), with negligible performance impact (the `flag_aodgrad` processing phase remained ~0.01-0.02 s/tile).
+
+## F.2 `debug` Terrain Diagnostics
+
+A new `[Options] debug` boolean configuration flag (default `False`) enables additional terrain diagnostic outputs, to help investigate cases where `uncertainty_from_terrain` appears too large.
+
+When `debug = True`:
+
+- `get_slope_err()` (in [fdr4vgt/funcs.py](../fdr4vgt/funcs.py)) additionally returns the terrain slope in degrees.
+- `process.py` stores this as `ds_out['slope_deg']`, and keeps `elev`/`Delev` in the pickled per-tile dataset.
+- `save_nc_batch()` (in [fdr4vgt/in_out.py](../fdr4vgt/in_out.py)) writes three extra output variables:
+
+| Variable                       | Description                                    |
+|---------------------------------|------------------------------------------------|
+| `terrain_slope_degrees`          | Terrain slope, in degrees                       |
+| `terrain_elevation_m`            | Terrain elevation (from the DEM), in meters     |
+| `terrain_delta_elevation_m`      | Terrain elevation uncertainty (`Delev`), in meters |
+
+: Debug-mode terrain diagnostic output variables
+
+`debug` defaults to `False` in all shipped configuration files (`tests/*.cfg`, `tests/all_process_*.cfg`).
+
+## F.3 HDF5 Chunk Size Clamp on Narrow Edge Tiles
+
+**Issue:** `save_nc_batch()` (in [fdr4vgt/in_out.py](../fdr4vgt/in_out.py)) previously created NetCDF variables with a fixed HDF5 chunk size (matching the configured `chunks_size`, e.g. 512 px) at all `createVariable()` call sites. Edge tiles narrower than the chunk size (e.g. 370 px wide) raised `ValueError: chunksize cannot exceed dimension size`.
+
+**Fix:** chunk height/width are now clamped per tile as `(min(chunks_size, height), min(chunks_size, width))`, computed once near the top of `save_nc_batch()` and reused at all five `createVariable()` call sites.
+
+**Validation:** confirmed on the `test_all_files.json` batch (7 scenes: `probav_1/2/3`, `spotvgt1_1/2/3/4`), where `probav_1` (tile X08Y00) and `probav_3` (tile X00Y00) previously failed with the chunk-size error on narrow edge tiles; the fix resolves the crash without altering output data for interior tiles (which already matched the configured chunk size).
+
 
 **Contractual outputs for FDR4VGT:** for this ATBD, the contractual kernel-facing outputs are the reflectance (`rTOC`, `rTOC_0`), the Jacobians (`Jrtoa`, `Juo3`, `Juh2o`, `Jpre`, `Jtau550`), and the aerosol spread (`UrTOC_ens`). Host-side uncertainty terms (`Duh2o`, `Duo3`, `Drtoa`, `Dpre`, `Dtaup`) are combined with these Jacobians in the uncertainty propagation equation of Section 5. This appendix defines the implementation API used by the operational chain and should be updated if the upstream HYGEOS `smaccl` API changes.

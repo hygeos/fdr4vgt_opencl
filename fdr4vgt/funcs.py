@@ -5,7 +5,7 @@ import xdem.terrain as xdem_terrain
 from core.interpolate import interp, Linear
 from core.tools import xrcrop
 from scipy.interpolate import RegularGridInterpolator
-from scipy.ndimage import maximum_filter
+from scipy.ndimage import maximum_filter, binary_closing
 import psutil
 import os
 from time import time
@@ -65,6 +65,7 @@ def build_flag(ds_input, ds_output, config_data):
 #    flag_aot = ds_input.rtoa.max(dim="bands") >= config_data.getfloat("Coefficients", "aotmax")
     aodmax = config_data.__dict__.get('aodmax', config_data.__dict__.get('aotmax'))
     aodmax_grad = config_data.__dict__.get('aodmax_grad', config_data.__dict__.get('aod_max_grad'))
+    grad_method = str(config_data.__dict__.get('aod_grad_threshold_method', 'fixed')).lower()
     flag_aot = np.max(ds_input['TOA'], axis=0) >= float(aodmax)
 #    flag_toc_min = ds_output.rtoc_run.min(dim="bands") < config_data.getfloat("Coefficients", "tocmin")
     _flag_toc_min = np.min(ds_output['rTOC'], axis=0) < config_data.getfloat("tocmin")
@@ -72,7 +73,56 @@ def build_flag(ds_input, ds_output, config_data):
     _flag_toc_max = np.max(ds_output['rTOC'], axis=0) > config_data.getfloat("tocmax")
 #    flag_sza_max = ds_input.tetas > config_data.getfloat("Coefficients", "szamax")
     flag_sza_max = ds_input['SZA'] > config_data.getfloat("szamax")
-    flag_aot_grad = ds_output['aod_grad'] > float(aodmax_grad)
+    grad_floor = float(aodmax_grad)
+    if grad_method == 'robust':
+        grad = np.asarray(ds_output['aod_grad']).astype(np.float32)
+        valid = np.isfinite(grad)
+        if np.any(valid):
+            g = grad[valid]
+            med = np.median(g)
+            mad = np.median(np.abs(g - med))
+            sigma = 1.4826 * mad
+            k = float(config_data.__dict__.get('aod_grad_robust_k', 6.0))
+            q = float(config_data.__dict__.get('aod_grad_robust_quantile', 0.995))
+            q = min(max(q, 0.5), 0.999999)
+            qv = float(np.quantile(g, q))
+            grad_thr = max(grad_floor, float(med + k * sigma), qv)
+        else:
+            grad_thr = grad_floor
+    else:
+        grad_thr = grad_floor
+    flag_aot_grad = ds_output['aod_grad'] > grad_thr
+
+    # Optional morphology-assisted expansion around high-gradient cores to
+    # better capture halo-like artefacts while avoiding unconstrained growth.
+    if bool(config_data.__dict__.get('aod_grad_morph_enable', False)):
+        seed = np.asarray(flag_aot_grad).astype(bool)
+        radius = int(config_data.__dict__.get('aod_grad_morph_radius_px', 1))
+        if radius > 0:
+            size = 2 * radius + 1
+            expanded = maximum_filter(seed.astype(np.uint8), size=size, mode='nearest') > 0
+        else:
+            expanded = seed
+
+        close_radius = int(config_data.__dict__.get('aod_grad_morph_closing_radius_px', 0))
+        if close_radius > 0:
+            close_size = 2 * close_radius + 1
+            structure = np.ones((close_size, close_size), dtype=bool)
+            expanded = binary_closing(expanded, structure=structure)
+
+        grad = np.asarray(ds_output['aod_grad']).astype(np.float32)
+        guard_rel = float(config_data.__dict__.get('aod_grad_morph_guard_rel', 0.5))
+        guard = np.isfinite(grad) & (grad >= guard_rel * grad_thr)
+
+        # Use interpolated MERRA AOD when available to constrain expansions to
+        # physically plausible aerosol-risk neighborhoods.
+        if 'TOTEXTTAU' in ds_input:
+            tau = np.asarray(ds_input['TOTEXTTAU']).astype(np.float32)
+            tau_rel = float(config_data.__dict__.get('aod_grad_morph_aod_rel', 0.8))
+            guard = guard | (np.isfinite(tau) & (tau >= tau_rel * float(aodmax)))
+
+        flag_aot_grad = seed | (expanded & guard)
+
     flag_cloud = ds_input['clm'] != 0 # cloud contaminated flag
 #    flag = ((flag_aot.data.astype(np.int16) << 0) | #lsb
 #            (flag_toc_min.data.astype(np.int16) << 1) |
@@ -804,6 +854,11 @@ def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize, 
     slope = terrain_data["slope"]
     aspect = terrain_data["aspect"]
 
-    return slope_err(ds_probav, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer)
+    # Also return the local terrain slope (degrees) used to derive the terrain
+    # uncertainty term, so callers can save it for debugging (e.g. when the
+    # uncertainty_from_terrain contribution looks too large).
+    slope_deg = slope.data.astype(np.float32)
+
+    return slope_err(ds_probav, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer), slope_deg
 
 pass

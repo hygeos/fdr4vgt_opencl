@@ -490,7 +490,7 @@ Three sources of RT approximation errors:
 
 The BRDF effect is estimated by comparing Lambertian vs BRDF-corrected runs:
 
-$$u_{BRDF}(R_{toc}) = R_{toc}(k_{1p}=0, k_{2p}=0) - R_{toc}(k_{1p} \neq 0, k_{2p} \neq 0) \qquad (25)$$
+$$u_{BRDF}(R_{toc}) = \left|R_{toc}(k_{1p}=0, k_{2p}=0) - R_{toc}(k_{1p} \neq 0, k_{2p} \neq 0)\right| \qquad (25)$$
 
 Significance: Moderate (NIR, high AOD). Magnitude: ~1% for most cases, up to 5% for strong BRDF + high AOD.
 
@@ -500,7 +500,7 @@ The CESBIO terrain model computes the terrain-induced relative effect:
 
 $$slope_{eff} = \frac{T}{T_{dir} \cdot \frac{\mu_i}{\mu_s} + T_{dif} \cdot f_{sky} + T \cdot f_{ground} \cdot \rho_{env}} \qquad (26)$$
 
-$$u_{terrain}(R_{toc}) = R_{toc} \cdot (slope_{eff} - 1) \qquad (27)$$
+$$u_{terrain}(R_{toc}) = \left|R_{toc} \cdot (slope_{eff} - 1)\right| \qquad (27)$$
 
 Where:
 

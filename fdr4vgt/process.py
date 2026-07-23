@@ -127,6 +127,54 @@ def interp_merra_tile(aer, p2, lat_sat, lon_sat, time, shift_sat):
                         "OC_FRAC":(('y','x'),oc_frac/tau)})
     return merra
 
+
+def interp_merra_native_aod_grad(aer, lat_sat, lon_sat, time, shift_sat,
+                                 include_temporal=False,
+                                 temporal_scale_steps=1.0):
+    """
+    Compute AOD gradient magnitude on the native regular MERRA2 grid and
+    interpolate it to the target satellite grid.
+
+    This avoids taking gradients on already-interpolated satellite-grid AOD,
+    which can smooth or distort sharp MERRA2 transitions.
+    """
+    if shift_sat:
+        lon_sat = lon_sat.copy(deep=True)
+        vals = lon_sat.values
+        vals[vals < 0] += 360
+
+    tau = aer['TOTEXTTAU'].transpose('time', 'lat', 'lon')
+    lat = np.asarray(tau['lat'].values, dtype=np.float64)
+    lon = np.asarray(tau['lon'].values, dtype=np.float64)
+    tcoord = np.asarray(tau['time'].values)
+    vals = np.asarray(tau.values, dtype=np.float64)
+
+    # Keep native-index derivative scaling so thresholds remain comparable to
+    # the historical satellite-grid gradient metric.
+    if lat[0] > lat[-1]:
+        lat = lat[::-1]
+        vals = vals[:, ::-1, :]
+    if lon[0] > lon[-1]:
+        lon = lon[::-1]
+        vals = vals[:, :, ::-1]
+
+    dlat, dlon = np.gradient(vals, axis=(1, 2))
+    grad2 = dlat * dlat + dlon * dlon
+    if include_temporal and vals.shape[0] > 1:
+        dt = np.gradient(vals, axis=0)
+        grad2 = grad2 + (float(temporal_scale_steps) * dt) ** 2
+    grad_native = np.sqrt(grad2).astype(np.float32)
+
+    grad_da = xa.DataArray(
+        grad_native,
+        dims=('time', 'lat', 'lon'),
+        coords={'time': tcoord, 'lat': lat, 'lon': lon},
+    )
+    lat_v = np.asarray(lat_sat.values)
+    lon_v = np.asarray(lon_sat.values)
+    tv = np.datetime64(time.values) if hasattr(time, 'values') else np.datetime64(time)
+    return regular_interp(grad_da, lat_v, lon_v, tv)
+
 def pre_aer_models(faer):
     '''
         Read MERRA2 aerosols components fraction of the aerosol models
@@ -246,6 +294,10 @@ def _worker_compute_tile(task):
     kg_zone_multipliers = g.get('kg_zone_multipliers')
     s1 = g['s1']
     s2 = g['s2']
+    # When enabled ([Options] debug=True), also save the terrain slope (degrees),
+    # elevation and delta-elevation used by the terrain uncertainty term, to help
+    # diagnose cases where uncertainty_from_terrain looks too large.
+    debug = bool(config_.get('debug', False))
 
     S = g.get('S')
     if S is None:
@@ -288,6 +340,7 @@ def _worker_compute_tile(task):
     # cache built once in precompute_ancillary: slice this tile's halo'd window
     # from local disk instead of re-interpolating and re-reading the network.
     # Fallback to per-tile interpolation when the cache is disabled.
+    aod_grad_native = None
     if anc_store is not None:
         anc = g.get('anc_ds')
         if anc is None:
@@ -296,6 +349,8 @@ def _worker_compute_tile(task):
         anc_tile = anc.isel(y=slice(y_min, y_max), x=slice(x_min, x_max)).load()
         for p in ['TOTEXTTAU','TQV','TO3','SLP','T10M','BC_FRAC','DU_FRAC','SS_FRAC','SU_FRAC','OC_FRAC']:
             data_batch[p] = (('y', 'x'), anc_tile[p].values)
+        if 'AOD_GRAD_NATIVE' in anc_tile.variables:
+            aod_grad_native = anc_tile['AOD_GRAD_NATIVE'].values
         iaer_best = anc_tile['iaer_best'].values
         iaer_month = anc_tile['iaer_month'].values
     else:
@@ -310,7 +365,7 @@ def _worker_compute_tile(task):
     iaero[0] = iaer_best
     iaero[1:] = iaer_month
     pression = data_batch['SLP'] * config_['k_p0']
-    slope_err = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaero[1], chunksize=batch_size, dem_ds=dem_ds)
+    slope_err, slope_deg = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaero[1], chunksize=batch_size, dem_ds=dem_ds)
     slope_err = np.maximum(slope_err, -2)
     slope_err = np.minimum(slope_err, 2)
     _now = time(); _PHASE_T['2_slope_err'] += _now - _tp; _tp = _now
@@ -330,24 +385,42 @@ def _worker_compute_tile(task):
     ds_out = run(S, data_batch, iaero)
     _now = time(); _PHASE_T['3_smaccl_run'] += _now - _tp; _tp = _now
     slope_err = slope_err[:, y_min_2:y_max_2, x_min:x_max]
+    slope_deg = slope_deg[y_min_2:y_max_2, x_min:x_max]
     ds_out['iaero'] = (('y','x'), iaer_best[y_min_2:y_max_2, x_min:x_max])
 
-    # gradiant AOD
-    ygrad, xgrad = da.gradient(data_batch['TOTEXTTAU'].data)
-    aod_grad = np.sqrt(ygrad**2 + xgrad**2)
+    # AOD-gradient proxy for artefact flagging.
+    grad_source = str(config_.get('aod_grad_source', 'merra_native')).lower()
+    if grad_source == 'merra_native':
+        if aod_grad_native is None:
+            aod_grad = interp_merra_native_aod_grad(
+                merra_aer_g,
+                data_batch['lat'],
+                data_batch['lon'],
+                date_time,
+                merra_shift,
+                include_temporal=bool(config_.get('aod_grad_native_use_temporal', False)),
+                temporal_scale_steps=float(config_.get('aod_grad_temporal_scale_steps', 1.0)),
+            )
+        else:
+            aod_grad = aod_grad_native[y_min_2:y_max_2, x_min:x_max]
+    else:
+        ygrad, xgrad = da.gradient(data_batch['TOTEXTTAU'].data)
+        aod_grad = np.sqrt(ygrad**2 + xgrad**2)
+        del ygrad
+        del xgrad
     ds_out = ds_out.assign({'aod_grad': (('y','x'), aod_grad)})
-    del ygrad
-    del xgrad
 
-    urtoc_rtm_slope = ds_out['rTOC'].data*(slope_err - 1)
+    urtoc_rtm_slope = np.abs(ds_out['rTOC'].data * (slope_err - 1))
     ds_out['slope_err'] = (('bands','y', 'x'), slope_err)
     ds_out['urtoc_terrain'] = (('bands','y', 'x'), urtoc_rtm_slope)
+    if debug:
+        ds_out['slope_deg'] = (('y', 'x'), slope_deg.astype(np.float32))
     flag = build_flag(data_batch, ds_out, config)
     ds_out['flag'] = flag
     _now = time(); _PHASE_T['4_flag_aodgrad'] += _now - _tp; _tp = _now
 
     if config_.get('enable_brdf_uncertainty', True):
-        urtoc_rtm_brdf = ds_out['rTOC_0'].values - ds_out['rTOC'].values
+        urtoc_rtm_brdf = np.abs(ds_out['rTOC_0'].values - ds_out['rTOC'].values)
     else:
         urtoc_rtm_brdf = np.zeros_like(ds_out['rTOC'].values, dtype=np.float32)
     ds_out['UrTOC_rtm_brdf'] = (('bands', 'y', 'x'), urtoc_rtm_brdf)
@@ -399,8 +472,10 @@ def _worker_compute_tile(task):
     data_batch = apply_cf_attributes_from_json(data_batch, config_['cf_json_path'])
 
     _now = time(); _PHASE_T['6_uncertainty'] += _now - _tp; _tp = _now
-    # Keep only what save needs and load to numpy (compute in the worker).
-    data_batch = data_batch[[v for v in _SAVE_IN_VARS if v in data_batch.variables]].load()
+    # Keep only what save needs and load to numpy (compute in the worker). In
+    # debug mode also keep elev/Delev so they can be written to the output file.
+    _save_in_vars = _SAVE_IN_VARS + ['elev', 'Delev'] if debug else _SAVE_IN_VARS
+    data_batch = data_batch[[v for v in _save_in_vars if v in data_batch.variables]].load()
     ds_out = ds_out.load()
     _now = time(); _PHASE_T['7_cf_load'] += _now - _tp; _tp = _now
     return iband, jband, data_batch, ds_out
@@ -408,7 +483,8 @@ def _worker_compute_tile(task):
 
 # MERRA2 fields cached to the local ancillary Zarr store (interpolated once).
 _MERRA_CACHE_VARS = ['TOTEXTTAU','TQV','TO3','SLP','T10M',
-                     'BC_FRAC','DU_FRAC','SS_FRAC','SU_FRAC','OC_FRAC']
+                     'BC_FRAC','DU_FRAC','SS_FRAC','SU_FRAC','OC_FRAC',
+                     'AOD_GRAD_NATIVE']
 # Keep pressure/temperature in float32: ISmaccl->Ps computes log(R*T), and
 # float16 overflows for typical T10M (~290 K) because R*T > 65504.
 _MERRA_CACHE_FLOAT32_VARS = {'SLP', 'T10M'}
@@ -490,9 +566,21 @@ def precompute_ancillary(data, config_, merra_globals, monthly_datasets,
 
             merra_tile = interp_merra_tile(merra_aer_g, merra_p2_g,
                                            lat, lon, dt, merra_shift)
+            aod_grad_native = interp_merra_native_aod_grad(
+                merra_aer_g,
+                lat,
+                lon,
+                dt,
+                merra_shift,
+                include_temporal=bool(config_.get('aod_grad_native_use_temporal', False)),
+                temporal_scale_steps=float(config_.get('aod_grad_temporal_scale_steps', 1.0)),
+            )
             region_vars = {}
             for v in _MERRA_CACHE_VARS:
-                arr = np.asarray(merra_tile[v].values, dtype=np.float32)
+                if v == 'AOD_GRAD_NATIVE':
+                    arr = np.asarray(aod_grad_native, dtype=np.float32)
+                else:
+                    arr = np.asarray(merra_tile[v].values, dtype=np.float32)
                 arr[filtre] = np.nan
                 region_vars[v] = (('y', 'x'), arr)
             merra_masked = xa.Dataset(region_vars)
@@ -645,7 +733,7 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512, 
         for task in tasks:
             iband, jband, ds_in, ds_out = _worker_compute_tile(task)
             t0 = time()
-            save_nc_batch(nc_out, ds_in, ds_out, iband, jband, batch_size, config_['jacobian'])
+            save_nc_batch(nc_out, ds_in, ds_out, iband, jband, batch_size, config_['jacobian'], config_.get('debug', False))
             if done % flush_interval == 0:
                 nc_out.close()
                 nc_out = Dataset(output_path, 'a', format='NETCDF4')
@@ -671,7 +759,7 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512, 
                 fut = inflight.pop(0)
                 iband, jband, ds_in, ds_out = fut.result()
                 t0 = time()
-                save_nc_batch(nc_out, ds_in, ds_out, iband, jband, batch_size, config_['jacobian'])
+                save_nc_batch(nc_out, ds_in, ds_out, iband, jband, batch_size, config_['jacobian'], config_.get('debug', False))
                 if done % flush_interval == 0:
                     nc_out.close()
                     nc_out = Dataset(output_path, 'a', format='NETCDF4')
@@ -739,6 +827,17 @@ def process(configfile):
         config_['aodmax'] = config_.get('aotmax', config_.get('taot', 0.6))
     if 'aodmax_grad' not in config_:
         config_['aodmax_grad'] = config_.get('aod_max_grad', 1.4e-4)
+    config_.setdefault('aod_grad_source', 'merra_native')
+    config_.setdefault('aod_grad_threshold_method', 'robust')
+    config_.setdefault('aod_grad_robust_k', 6.0)
+    config_.setdefault('aod_grad_robust_quantile', 0.995)
+    config_.setdefault('aod_grad_native_use_temporal', False)
+    config_.setdefault('aod_grad_temporal_scale_steps', 1.0)
+    config_.setdefault('aod_grad_morph_enable', False)
+    config_.setdefault('aod_grad_morph_radius_px', 1)
+    config_.setdefault('aod_grad_morph_closing_radius_px', 0)
+    config_.setdefault('aod_grad_morph_guard_rel', 0.5)
+    config_.setdefault('aod_grad_morph_aod_rel', 0.8)
     # SMACCL still expects taot for its internal high-AOD process flag.
     config_['taot'] = float(config_['aodmax'])
     config.set('amip_path', config_['amip_path'])
@@ -753,6 +852,15 @@ def process(configfile):
     config.set('szamax', config_['szamax'])
     config.set('aodmax_grad', config_['aodmax_grad'])
     config.set('aod_max_grad', config_['aodmax_grad'])
+    config.set('aod_grad_source', config_['aod_grad_source'])
+    config.set('aod_grad_threshold_method', config_['aod_grad_threshold_method'])
+    config.set('aod_grad_robust_k', config_['aod_grad_robust_k'])
+    config.set('aod_grad_robust_quantile', config_['aod_grad_robust_quantile'])
+    config.set('aod_grad_morph_enable', config_['aod_grad_morph_enable'])
+    config.set('aod_grad_morph_radius_px', config_['aod_grad_morph_radius_px'])
+    config.set('aod_grad_morph_closing_radius_px', config_['aod_grad_morph_closing_radius_px'])
+    config.set('aod_grad_morph_guard_rel', config_['aod_grad_morph_guard_rel'])
+    config.set('aod_grad_morph_aod_rel', config_['aod_grad_morph_aod_rel'])
 
     # Optional uncertainty switches / parameters.
     config_.setdefault('enable_brdf_uncertainty', True)

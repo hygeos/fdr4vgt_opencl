@@ -1,0 +1,50 @@
+{
+    "PROBA-V": {
+        "input": [
+            "/mnt/ceph/proj/FDR4VGT/input/probav/20150130/",
+            "/mnt/ceph/proj/FDR4VGT/input/probav/20200402/",
+            "/mnt/ceph/proj/FDR4VGT/input/PROBAV_L2A_20200402_223152_3_1KM_V301/"
+        ],
+        "output": [
+            "/mnt/ceph/proj/FDR4VGT/output/all_process_v2/PROBAV_L1C_20150130_231346_1_1KM_X08Y00_V301_toc_native_robust_k3_q98_morph.nc",
+            "/mnt/ceph/proj/FDR4VGT/output/all_process_v2/PROBAV_L2A_20200402_223152_3_1KM_V301_toc_native_robust_k3_q98_morph.nc",
+            "/mnt/ceph/proj/FDR4VGT/output/all_process_v2/PROBAV_L1C_20200402_090258_2_1KM_X00Y00_V301_toc_native_robust_k3_q98_morph.nc"
+        ],
+        "merraaero": [
+            "/mnt/ceph/data/MERRA2/aer_extinction/2015/",
+            "/mnt/ceph/data/MERRA2/aer_extinction/2020/",
+            "/mnt/ceph/data/MERRA2/aer_extinction/2020/"
+        ],
+        "merraptwo": [
+            "/mnt/ceph/data/MERRA2/surf_pression_water_vapor/2015/",
+            "/mnt/ceph/data/MERRA2/surf_pression_water_vapor/2020/",
+            "/mnt/ceph/data/MERRA2/surf_pression_water_vapor/2020/"
+        ]
+    },
+    "SPOTVGT1": {
+        "input": [
+            "/mnt/ceph/proj/FDR4VGT/input/INPUT_SMACCL_19990405/INPUT_ATMCOR_X00Y00/",
+            "/mnt/ceph/proj/FDR4VGT/input/INPUT_SMACCL_19990405/INPUT_ATMCOR_X00Y01/",
+            "/mnt/ceph/proj/FDR4VGT/input/INPUT_SMACCL_19990405/INPUT_ATMCOR_X01Y00/",
+            "/mnt/ceph/proj/FDR4VGT/input/spotvgt1/SPOTVGT1_L2A_19990101_092931_1KM_V301/"
+        ],
+        "output": [
+            "/mnt/ceph/proj/FDR4VGT/output/all_process_v2/SPOTVGT1_L1C_19990405_105833_1KM_X00Y00_V301_toc_native_robust_k3_q98_morph.nc",
+            "/mnt/ceph/proj/FDR4VGT/output/all_process_v2/SPOTVGT1_L1C_19990405_105833_1KM_X00Y01_V301_toc_native_robust_k3_q98_morph.nc",
+            "/mnt/ceph/proj/FDR4VGT/output/all_process_v2/SPOTVGT1_L1C_19990405_105833_1KM_X01Y00_V301_toc_native_robust_k3_q98_morph.nc",
+            "/mnt/ceph/proj/FDR4VGT/output/all_process_v2/SPOTVGT1_L2A_19990101_092931_1KM_V301_toc_native_robust_k3_q98_morph.nc"
+        ],
+        "merraaero": [
+            "/mnt/ceph/data/MERRA2/aer_extinction/1999/",
+            "/mnt/ceph/data/MERRA2/aer_extinction/1999/",
+            "/mnt/ceph/data/MERRA2/aer_extinction/1999/",
+            "/mnt/ceph/data/MERRA2/aer_extinction/1999/"
+        ],
+        "merraptwo": [
+            "/mnt/ceph/data/MERRA2/surf_pression_water_vapor/1999/",
+            "/mnt/ceph/data/MERRA2/surf_pression_water_vapor/1999/",
+            "/mnt/ceph/data/MERRA2/surf_pression_water_vapor/1999/",
+            "/mnt/ceph/data/MERRA2/surf_pression_water_vapor/1999/"
+        ]
+    }
+}
