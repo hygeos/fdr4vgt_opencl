@@ -1,8 +1,8 @@
 ---
 title: "FDR4VGT Atmospheric Correction"
-subtitle: "Algorithm Theoretical Basis Document (v1.2)"
-version: "1.2"
-reference: FDR4VGT-processing-AC-ATBD_v1.2
+subtitle: "Algorithm Theoretical Basis Document (v1.1)"
+version: "1.1"
+reference: FDR4VGT-processing-AC-ATBD_v1.1
 client: ESA
 contrat: FDR4VGT_XXXXXX
 date: today
@@ -32,9 +32,9 @@ fontsize: 11pt
 ## Atmospheric Correction ATBD {.unnumbered .unlisted}
 
 **Date Issued:** 23.07.2026\
-**Issue:** I1.2
+**Issue:** I1.1
 
-> Ref: FDR4VGT-processing-AC-ATBD_v1.2
+> Ref: FDR4VGT-processing-AC-ATBD_v1.1
 >
 > Contract No : FDR4VGT_XXXXXX
 
@@ -46,15 +46,13 @@ Contributors
 
 History of modifications
 
-+-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
-| **Version** | **Date**   | **Description of modification**    | **Chapters / Sections**                                                                                     |
-+:============+:===========+:===================================+:============================================================================================================+
-| V1.0        | 15/01/2026 | Draft Initial version              | All                                                                                                         |
-+-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
-| V1.1        | 17/07/2026 | Implementation notes, performance  | optimizations, float32 overflow fix, known limitations, SMACCL OpenCL kernel API New Appendix D, Appendix E |
-+-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
-| V1.2        | 23/07/2026 | AOD gradient halo detection (Bit 3 | quality flag), debug=True terrain diagnostics, HDF5 chunksize edge-tile fix. New Appendix F \|              |
-+-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
++-------------+------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+
+| **Version** | **Date**   | **Description of modification**                                                                                                                                                                                                    | **Chapters / Sections**            |
++:============+:===========+:===================================================================================================================================================================================================================================+:===================================+
+| V1.0        | 15/01/2026 | Draft Initial version                                                                                                                                                                                                              | All                                |
++-------------+------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+
+| V1.1        | 23/07/2026 | Implementation notes, performance optimizations, float32 overflow fix, known limitations, SMACCL OpenCL kernel API, AOD gradient halo detection (Bit 3 quality flag), debug=True terrain diagnostics, HDF5 chunksize edge-tile fix | Appendix D, Appendix E, Appendix F |
++-------------+------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+
 
 Related documents
 
@@ -266,14 +264,9 @@ This v1.1 revision keeps the full v1.0 content below **unchanged** and adds the 
 - **Appendix E: SMACCL OpenCL Kernel API** — the Python host wrapper API (`Smaccl.run`), the OpenCL kernel signature (`devicecl.cl`), the output variable mapping, and the `ISmaccl` product-level wrapper API, as implemented in the HYGEOS `smaccl` repository.
 - A **critical bug-fix note** on surface pressure computation: `SLP` and `T10M` must be stored as float32 (not float16) in the ancillary cache to avoid overflow in `log(R·T)` (see Appendix D.2 and the note under Effect 4: Surface Pressure Uncertainty).
 - Confirmation that **DEM interpolation** uses linear interpolation (an improvement over the nearest-neighbor method originally specified), and that **adjacency effects** and **Köppen-Geiger regionalization** are, respectively, a known limitation and a planned feature.
-
-## What's New in v1.2
-
-This v1.2 revision keeps the full v1.0/v1.1 content below **unchanged** and adds the following new material:
-
 - **Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix** — a two-stage risk mask (Seed OR (Dilated Seed AND Guard)) replacing the single-threshold AOD-gradient criterion for quality-flag Bit 3, the `debug=True` terrain diagnostic output variables, and the HDF5 chunksize clamp fix for narrow edge tiles.
 - An **enhancement note** on quality-flag Bit 3 (High AOD gradient): MERRA AOD high-value thresholding alone leaves gradient "halos" around high-AOD pixels that are under-flagged at their core; the implementation now supports a native-MERRA-grid gradient source, a robust (median/MAD-based) threshold option, and an optional morphological dilation+guard step. The robust threshold is now computed once per scene from the full cached native-grid gradient (instead of per tile), and a separately-calibrated `aodmax_grad_native` constant is used for the `fixed` method when `aod_grad_source=merra_native`. See Appendix F.1 and the note under Effect/Bit 3 in the Level 2A Output Variables section.
-- A **correction** to quality-flag Bit 1 (High AOD): the criterion now compares the MERRA-2 interpolated AOD@550 actually used in the retrieval (`AOD_550_used`, internally `TOTEXTTAU`) against `aodmax`, instead of the maximum TOA reflectance across bands, which was only a loose proxy for aerosol loading. See the note under Effect/Bit 1 in the Level 2A Output Variables section.
+- A **correction** to quality-flag Bit 1 (High AOD): the criterion now compares the MERRA-2 interpolated AOD\@550 actually used in the retrieval (`AOD_550_used`, internally `TOTEXTTAU`) against `aodmax`, instead of the maximum TOA reflectance across bands, which was only a loose proxy for aerosol loading. See the note under Effect/Bit 1 in the Level 2A Output Variables section.
 - A **new `debug` configuration option** (\[Options\] `debug`, default `False`) that adds three diagnostic output variables — `terrain_slope_degrees`, `terrain_elevation_m`, `terrain_delta_elevation_m` — to help diagnose terrain-uncertainty behavior. See Appendix F.2.
 - A **bug-fix note** on `save_nc_batch` (in_out.py): HDF5 chunk sizes are now clamped to the tile's actual height/width, fixing a `ValueError: chunksize cannot exceed dimension size` crash on narrow edge tiles smaller than the configured chunk size. See Appendix F.3.
 
@@ -1699,7 +1692,7 @@ The standard outputs of AC module are:
 
 For implementation consistency, a single AOD threshold parameter `aodmax` is used in configuration and propagated to the SMAC-CL internal high-AOD threshold (`taot`) at runtime. Therefore, both the internal SMAC-CL high-AOD process flag and the project quality criterion use the same numerical limit.
 
-> **Implementation Note (v1.2):** Bit 1 now compares the MERRA-2 interpolated AOD@550 actually used in the retrieval (`TOTEXTTAU`, output as `AOD_550_used`) against `aodmax`, rather than the maximum TOA reflectance across bands. The reflectance-based criterion was only an indirect proxy for aerosol loading (reflectance is also driven by surface type, sun-view geometry, etc.), whereas the AOD-based criterion directly reflects the quantity the threshold name ("High AOD") describes and is consistent with the input used elsewhere in the aerosol-correction chain.
+> **Implementation Note (v1.1):** Bit 1 now compares the MERRA-2 interpolated AOD\@550 actually used in the retrieval (`TOTEXTTAU`, output as `AOD_550_used`) against `aodmax`, rather than the maximum TOA reflectance across bands. The reflectance-based criterion was only an indirect proxy for aerosol loading (reflectance is also driven by surface type, sun-view geometry, etc.), whereas the AOD-based criterion directly reflects the quantity the threshold name ("High AOD") describes and is consistent with the input used elsewhere in the aerosol-correction chain.
 
 The gradient-based flag uses:
 
@@ -1709,7 +1702,7 @@ and raises Bit 3 when:
 
 $$aod\_grad > aodmax\_grad$$
 
-> **Implementation Note (v1.2):** MERRA AOD high-value thresholding alone leaves gradient "halos" of too-high `Rtoc` around high-AOD pixels, since the strongest gradient is often only at the halo edge, not the core. The implementation therefore supports an enhanced, two-stage risk mask for Bit 3: `Bit3 = Seed OR (DilatedSeed AND Guard)`, where Seed is the `aod_grad > aodmax_grad` criterion above (optionally on a robust median/MAD-based threshold instead of a fixed one), DilatedSeed is a morphological dilation (+ optional closing) of Seed to catch adjacent halo-ring pixels, and Guard requires a moderate relative gradient or elevated relative AOD to prevent overgrowth. See Appendix F.1 for the configuration knobs and validation results.
+> **Implementation Note (v1.1):** MERRA AOD high-value thresholding alone leaves gradient "halos" of too-high `Rtoc` around high-AOD pixels, since the strongest gradient is often only at the halo edge, not the core. The implementation therefore supports an enhanced, two-stage risk mask for Bit 3: `Bit3 = Seed OR (DilatedSeed AND Guard)`, where Seed is the `aod_grad > aodmax_grad` criterion above (optionally on a robust median/MAD-based threshold instead of a fixed one), DilatedSeed is a morphological dilation (+ optional closing) of Seed to catch adjacent halo-ring pixels, and Guard requires a moderate relative gradient or elevated relative AOD to prevent overgrowth. See Appendix F.1 for the configuration knobs and validation results.
 
 TOC directional reflectances and Jacobians are direct outputs of the SMAC procedure (done in the GPU) while the [associated uncertainties are post-processed in the CPU]{.underline} as described in section 5.2. The quantities used are:
 
@@ -1904,9 +1897,9 @@ Standard outputs variables (TOC-reflectances and total associated uncertainties)
 **Quality Flags:**
 
 - Bit 0: Cloud-contaminated pixel
-- Bit 1: High AOD (`AOD_550_used` \>= `aodmax`, default 0.6; v1.2, see note under Effect/Bit 1 above)
+- Bit 1: High AOD (`AOD_550_used` \>= `aodmax`, default 0.6; v1.1, see note under Effect/Bit 1 above)
 - Bit 2: High SZA (SZA \> `szamax`, default 80°)
-- Bit 3: High AOD gradient — two-stage risk mask `Seed OR (DilatedSeed AND Guard)` (v1.2, see Appendix F.1); Seed is `aod_grad` \> `aodmax_grad` (default 1.4e-4, fixed or robust threshold)
+- Bit 3: High AOD gradient — two-stage risk mask `Seed OR (DilatedSeed AND Guard)` (v1.1, see Appendix F.1); Seed is `aod_grad` \> `aodmax_grad` (default 1.4e-4, fixed or robust threshold)
 - Bit 4: AC algorithm failure (reserved in current implementation)
 - Bit 5: Missing auxiliary data (reserved in current implementation)
 - Bit 6: Out-of-LUT range (reserved in current implementation)
@@ -2635,7 +2628,7 @@ This extends the kernel outputs by including uncertainty-input terms (`D*`) comp
 
 If no compatible/available device is found, initialization fails.
 
-# Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix (NEW in v1.2)
+# Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix (NEW in v1.1)
 
 This appendix documents three implementation changes made after v1.1: an enhanced two-stage detection scheme for quality-flag Bit 3 (High AOD gradient), an optional `debug` mode adding terrain-diagnostic output variables, and a bug fix for HDF5 chunk sizing on narrow edge tiles. As with Appendix D, these are engineering/implementation refinements and do not change the underlying AC physics described in Sections 1-10.
 
@@ -2648,7 +2641,7 @@ This appendix documents three implementation changes made after v1.1: an enhance
 $$Bit3 = Seed \lor (DilatedSeed \land Guard)$$
 
 - **Seed** — the existing gradient criterion, $aod\_grad > aodmax\_grad$ (Section "Level 2A Output Variables"), with two threshold variants:
-  - *fixed*: a constant threshold. When `aod_grad_source=merra_native`, this is `aodmax_grad_native` (default 0.15) rather than `aodmax_grad` (default 1.4e-4): the native-MERRA-grid gradient is an index-based derivative on the ~0.5-0.625° MERRA-2 grid and is ~2-3 orders of magnitude larger in typical magnitude than the legacy interpolated-grid gradient that `aodmax_grad` was calibrated for (observed scene stats: median ~0.04, p99 ~0.17), so reusing `aodmax_grad` as-is flagged ~100% of pixels and made Bit 3 useless as a discriminator. For `aod_grad_source=legacy`, `aodmax_grad` is used as before.
+  - *fixed*: a constant threshold. When `aod_grad_source=merra_native`, this is `aodmax_grad_native` (default 0.15) rather than `aodmax_grad` (default 1.4e-4): the native-MERRA-grid gradient is an index-based derivative on the \~0.5-0.625° MERRA-2 grid and is \~2-3 orders of magnitude larger in typical magnitude than the legacy interpolated-grid gradient that `aodmax_grad` was calibrated for (observed scene stats: median \~0.04, p99 \~0.17), so reusing `aodmax_grad` as-is flagged \~100% of pixels and made Bit 3 useless as a discriminator. For `aod_grad_source=legacy`, `aodmax_grad` is used as before.
   - *robust*: $\max(floor,\ median + k \cdot 1.4826 \cdot MAD,\ quantile(q))$, computed on the AOD-gradient field, which adapts to the local/scene noise level instead of a single global constant. This threshold is computed **once per scene**, from the full cached native-grid `AOD_GRAD_NATIVE` grid (in `process_batched()`), rather than per tile: per-tile robust statistics were found to be self-masking, since a tile overlapping the scene's strongest real gradient feature has its own median/MAD inflated by that very feature, which raises its local bar and hides the feature it should flag. A per-tile fallback (identical recipe, computed on the tile's own `aod_grad`) is used in `build_flag()` only when the scene-wide value is unavailable (e.g., the ancillary cache is disabled).
 - **Dilated Seed** — a morphological dilation (with an optional closing) of the Seed mask, to catch adjacent halo-ring pixels that fall below the Seed threshold.
 - **Guard** — prevents the dilation from over-growing the flagged area; requires either a moderate gradient (relative to `aodmax_grad`) or an elevated interpolated AOD (relative to a threshold), so that dilated pixels are only kept where there is still supporting evidence of aerosol contamination.
