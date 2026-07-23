@@ -66,15 +66,40 @@ def build_flag(ds_input, ds_output, config_data):
     aodmax = config_data.__dict__.get('aodmax', config_data.__dict__.get('aotmax'))
     aodmax_grad = config_data.__dict__.get('aodmax_grad', config_data.__dict__.get('aod_max_grad'))
     grad_method = str(config_data.__dict__.get('aod_grad_threshold_method', 'fixed')).lower()
-    flag_aot = np.max(ds_input['TOA'], axis=0) >= float(aodmax)
+    grad_source = str(config_data.__dict__.get('aod_grad_source', 'merra_native')).lower()
+    flag_aot = np.asarray(ds_input['TOTEXTTAU']) >= float(aodmax)
 #    flag_toc_min = ds_output.rtoc_run.min(dim="bands") < config_data.getfloat("Coefficients", "tocmin")
     _flag_toc_min = np.min(ds_output['rTOC'], axis=0) < config_data.getfloat("tocmin")
 #    flag_toc_max = ds_output.rtoc_run.max(dim="bands") > config_data.getfloat("Coefficients", "tocmax")
     _flag_toc_max = np.max(ds_output['rTOC'], axis=0) > config_data.getfloat("tocmax")
 #    flag_sza_max = ds_input.tetas > config_data.getfloat("Coefficients", "szamax")
     flag_sza_max = ds_input['SZA'] > config_data.getfloat("szamax")
+    # `aodmax_grad` (default 1.4e-4) was calibrated for the legacy
+    # `aod_grad_source=interpolated` gradient (spatial gradient of AOD already
+    # interpolated onto the ~1 km sensor grid, so per-pixel deltas are tiny).
+    # The `merra_native` gradient is an index-based derivative on the native
+    # ~0.5-0.625 deg MERRA2 grid, which is ~2-3 orders of magnitude larger in
+    # typical magnitude (observed scene stats: median ~0.04, p99 ~0.17 vs a
+    # 1.4e-4 floor). Using `aodmax_grad` as-is for a *fixed* threshold against
+    # `merra_native` therefore flags ~100% of pixels (verified empirically) and
+    # makes Bit 3 useless as a discriminator. Keep `aodmax_grad` as the floor
+    # used by the (scale-adaptive) 'robust' method -- unaffected here, since
+    # 1.4e-4 is always dominated there by the data-driven med/quantile terms --
+    # and use a separately-calibrated `aodmax_grad_native` constant for the
+    # 'fixed' method when the native source is selected.
+    aodmax_grad_native = config_data.__dict__.get('aodmax_grad_native', 0.15)
     grad_floor = float(aodmax_grad)
-    if grad_method == 'robust':
+    # Scene-wide (whole-image) robust threshold, precomputed once in
+    # process_batched() from the full cached AOD_GRAD_NATIVE grid -- see there
+    # for why: per-tile robust statistics were found to be self-masking (a
+    # tile that itself contains the strongest real gradient feature has its
+    # own median/MAD inflated by that very feature, raising its bar and
+    # hiding the feature it should flag). When available, always prefer it
+    # over the per-tile fallback below.
+    grad_thr_global = config_data.__dict__.get('aod_grad_robust_thr_global')
+    if grad_method == 'robust' and grad_thr_global is not None:
+        grad_thr = float(grad_thr_global)
+    elif grad_method == 'robust':
         grad = np.asarray(ds_output['aod_grad']).astype(np.float32)
         valid = np.isfinite(grad)
         if np.any(valid):
@@ -89,6 +114,8 @@ def build_flag(ds_input, ds_output, config_data):
             grad_thr = max(grad_floor, float(med + k * sigma), qv)
         else:
             grad_thr = grad_floor
+    elif grad_source == 'merra_native':
+        grad_thr = float(aodmax_grad_native)
     else:
         grad_thr = grad_floor
     flag_aot_grad = ds_output['aod_grad'] > grad_thr

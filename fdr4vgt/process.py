@@ -680,6 +680,35 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512, 
             tmp_root=config_.get('tmp_dir') or None)
         atexit.register(shutil.rmtree, anc_tmpdir, ignore_errors=True)
 
+    # 'robust' Bit-3 threshold: compute it ONCE from the whole-scene cached
+    # AOD_GRAD_NATIVE grid rather than per-tile (the previous per-tile
+    # statistics were found to be self-masking -- a tile overlapping the
+    # scene's strongest real gradient feature has its own median/MAD inflated
+    # by that very feature, raising its local bar and hiding what should be
+    # flagged; a global threshold from the same k/quantile recipe avoids this
+    # and was empirically validated to track a fixed ~0.15 threshold closely
+    # on a high-AOT test scene while remaining scene-adaptive). Falls back to
+    # the existing per-tile computation in build_flag() when the ancillary
+    # cache is unavailable (anc_cache disabled).
+    if anc_store is not None and str(config_.get('aod_grad_threshold_method', 'fixed')).lower() == 'robust':
+        grad_full = xa.open_zarr(anc_store, consolidated=False)['AOD_GRAD_NATIVE'].values
+        gvalid = np.isfinite(grad_full)
+        if np.any(gvalid):
+            g = grad_full[gvalid].astype(np.float32)
+            med = np.median(g)
+            mad = np.median(np.abs(g - med))
+            sigma = 1.4826 * mad
+            k = float(config_.get('aod_grad_robust_k', 6.0))
+            q = min(max(float(config_.get('aod_grad_robust_quantile', 0.995)), 0.5), 0.999999)
+            qv = float(np.quantile(g, q))
+            grad_floor = float(config_.get('aodmax_grad', config_.get('aod_max_grad', 1.4e-4)))
+            thr_global = max(grad_floor, float(med + k * sigma), qv)
+            config.set('aod_grad_robust_thr_global', thr_global)
+            print("[process_batched] global robust aod_grad threshold = {:.5g} "
+                  "(med={:.4g} sigma={:.4g} q{:.1f}={:.4g})".format(
+                      thr_global, med, sigma, 100 * q, qv), flush=True)
+        del grad_full
+
     _SHARED.update(dict(
         data=data, batch_size=batch_size, config_=config_, ca_=ca_, ca_ind=ca_ind,
         ca2_=ca2_, frac_aer_model=frac_aer_model, monthly_datasets=monthly_datasets,
@@ -827,6 +856,13 @@ def process(configfile):
         config_['aodmax'] = config_.get('aotmax', config_.get('taot', 0.6))
     if 'aodmax_grad' not in config_:
         config_['aodmax_grad'] = config_.get('aod_max_grad', 1.4e-4)
+    # Separate fixed-threshold constant for aod_grad_source=merra_native: the
+    # native-grid index-based gradient is ~2-3 orders of magnitude larger than
+    # the legacy interpolated-grid gradient that `aodmax_grad` was calibrated
+    # for, so reusing `aodmax_grad` as a fixed threshold there flags ~100% of
+    # pixels. Only used when aod_grad_threshold_method='fixed'; the 'robust'
+    # method is scale-adaptive and unaffected.
+    config_.setdefault('aodmax_grad_native', 0.15)
     config_.setdefault('aod_grad_source', 'merra_native')
     config_.setdefault('aod_grad_threshold_method', 'robust')
     config_.setdefault('aod_grad_robust_k', 6.0)
@@ -852,6 +888,7 @@ def process(configfile):
     config.set('szamax', config_['szamax'])
     config.set('aodmax_grad', config_['aodmax_grad'])
     config.set('aod_max_grad', config_['aodmax_grad'])
+    config.set('aodmax_grad_native', config_['aodmax_grad_native'])
     config.set('aod_grad_source', config_['aod_grad_source'])
     config.set('aod_grad_threshold_method', config_['aod_grad_threshold_method'])
     config.set('aod_grad_robust_k', config_['aod_grad_robust_k'])

@@ -46,15 +46,15 @@ Contributors
 
 History of modifications
 
-+-------------+------------+-----------------------------------+-------------------------------------------------------------------------------------------------------------+
-| **Version** | **Date**   | **Description of modification**   | **Chapters / Sections**                                                                                     |
-+:============+:===========+:==================================+:============================================================================================================+
-| V1.0        | 15/01/2026 | Draft Initial version             | All                                                                                                         |
-+-------------+------------+-----------------------------------+-------------------------------------------------------------------------------------------------------------+
-| V1.1        | 17/07/2026 | Implementation notes, performance | optimizations, float32 overflow fix, known limitations, SMACCL OpenCL kernel API New Appendix D, Appendix E |
-+-------------+------------+-----------------------------------+-------------------------------------------------------------------------------------------------------------+
-| V1.2        | 23/07/2026 | AOD gradient halo detection (Bit 3| quality flag), debug=True terrain diagnostics, HDF5 chunksize edge-tile fix. New Appendix F              |
-+-------------+------------+-----------------------------------+-------------------------------------------------------------------------------------------------------------+
++-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
+| **Version** | **Date**   | **Description of modification**    | **Chapters / Sections**                                                                                     |
++:============+:===========+:===================================+:============================================================================================================+
+| V1.0        | 15/01/2026 | Draft Initial version              | All                                                                                                         |
++-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
+| V1.1        | 17/07/2026 | Implementation notes, performance  | optimizations, float32 overflow fix, known limitations, SMACCL OpenCL kernel API New Appendix D, Appendix E |
++-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
+| V1.2        | 23/07/2026 | AOD gradient halo detection (Bit 3 | quality flag), debug=True terrain diagnostics, HDF5 chunksize edge-tile fix. New Appendix F \|              |
++-------------+------------+------------------------------------+-------------------------------------------------------------------------------------------------------------+
 
 Related documents
 
@@ -273,7 +273,7 @@ This v1.2 revision keeps the full v1.0/v1.1 content below **unchanged** and adds
 
 - **Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix** — a two-stage risk mask (Seed OR (Dilated Seed AND Guard)) replacing the single-threshold AOD-gradient criterion for quality-flag Bit 3, the `debug=True` terrain diagnostic output variables, and the HDF5 chunksize clamp fix for narrow edge tiles.
 - An **enhancement note** on quality-flag Bit 3 (High AOD gradient): MERRA AOD high-value thresholding alone leaves gradient "halos" around high-AOD pixels that are under-flagged at their core; the implementation now supports a native-MERRA-grid gradient source, a robust (median/MAD-based) threshold option, and an optional morphological dilation+guard step. See Appendix F.1 and the note under Effect/Bit 3 in the Level 2A Output Variables section.
-- A **new `debug` configuration option** ([Options] `debug`, default `False`) that adds three diagnostic output variables — `terrain_slope_degrees`, `terrain_elevation_m`, `terrain_delta_elevation_m` — to help diagnose terrain-uncertainty behavior. See Appendix F.2.
+- A **new `debug` configuration option** (\[Options\] `debug`, default `False`) that adds three diagnostic output variables — `terrain_slope_degrees`, `terrain_elevation_m`, `terrain_delta_elevation_m` — to help diagnose terrain-uncertainty behavior. See Appendix F.2.
 - A **bug-fix note** on `save_nc_batch` (in_out.py): HDF5 chunk sizes are now clamped to the tile's actual height/width, fixing a `ValueError: chunksize cannot exceed dimension size` crash on narrow edge tiles smaller than the configured chunk size. See Appendix F.3.
 
 # Input and Auxiliary Data
@@ -2654,45 +2654,29 @@ $$Bit3 = Seed \lor (DilatedSeed \land Guard)$$
 
 **Configuration knobs** (`[Coefficients]` section, `fdr4vgt/spotvgt1_config.cfg` and `fdr4vgt/probav_config.cfg`):
 
-| Parameter                                | Meaning                                                            | Recommended default |
-|-------------------------------------------|---------------------------------------------------------------------|----------------------|
-| `aod_grad_source`                        | `merra_native` (compute gradient on native MERRA-2 grid) or `legacy` (interpolated AOD, then gradient) | `merra_native`       |
-| `aod_grad_threshold_method`              | `fixed` or `robust`                                                | `robust`             |
-| `aod_grad_robust_k`                      | Robust threshold MAD multiplier *k*                                | `3.0`                |
-| `aod_grad_robust_quantile`               | Robust threshold quantile *q*                                      | `0.98`               |
-| `aod_grad_morph_enable`                  | Enable dilation/closing + guard                                    | `True`               |
-| `aod_grad_morph_radius_px`               | Dilation structuring-element radius (pixels)                       | `1`                  |
-| `aod_grad_morph_closing_radius_px`       | Morphological closing radius (pixels)                               | `1`                  |
-| `aod_grad_morph_guard_rel`               | Guard: gradient threshold, relative to `aodmax_grad`                | `0.5`                |
-| `aod_grad_morph_aod_rel`                 | Guard: AOD threshold, relative to a reference AOD level             | `0.8`                |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| Parameter                          | Meaning                                                                                                | Recommended default |
++====================================+========================================================================================================+=====================+
+| `aod_grad_source`                  | `merra_native` (compute gradient on native MERRA-2 grid) or `legacy` (interpolated AOD, then gradient) | `merra_native`      |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_threshold_method`        | `fixed` or `robust`                                                                                    | `robust`            |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_robust_k`                | Robust threshold MAD multiplier *k*                                                                    | `3.0`               |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_robust_quantile`         | Robust threshold quantile *q*                                                                          | `0.98`              |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_morph_enable`            | Enable dilation/closing + guard                                                                        | `True`              |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_morph_radius_px`         | Dilation structuring-element radius (pixels)                                                           | `1`                 |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_morph_closing_radius_px` | Morphological closing radius (pixels)                                                                  | `1`                 |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_morph_guard_rel`         | Guard: gradient threshold, relative to `aodmax_grad`                                                   | `0.5`               |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aod_grad_morph_aod_rel`           | Guard: AOD threshold, relative to a reference AOD level                                                | `0.8`               |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
 
 : AOD gradient halo detection configuration knobs
-
-**Validation (A/B on a 4-tile SPOTVGT1 scene, 23,573,781 px, morphology disabled):**
-
-| Configuration                              | Bit 3 flagged fraction |
-|---------------------------------------------|------------------------|
-| Baseline (interpolated AOD, fixed threshold) | 2.433%                 |
-| Native MERRA grid, fixed threshold           | 3.312% (+36% vs. baseline) |
-| Interpolated AOD, robust threshold           | 0.005%                 |
-| Native MERRA grid, robust (k=6, q=0.995)     | 0.000% (too conservative) |
-
-: AOD gradient source/threshold A/B comparison
-
-The overly conservative robust(k=6, q=0.995) result led to retuning the recommended default to `robust_k=3.0`, `robust_quantile=0.98` (native MERRA grid), which is the default listed above.
-
-**Full-scene validation runs** (native MERRA grid + robust k=3.0/q=0.98 threshold):
-
-| Scene                       | Morphology | Bit 3 flagged             | Percentage |
-|------------------------------|------------|---------------------------|------------|
-| PROBA-V (80 tiles)            | Disabled   | 32,905 / 19,655,757        | 0.167%     |
-| PROBA-V (80 tiles)            | Enabled (radius=1, closing=1, guard_rel=0.5, aod_rel=0.8) | 36,616 / 19,655,757 | 0.186% (+11.3%) |
-| SPOTVGT1 (100 tiles)          | Disabled   | 20,233 / 23,573,781        | 0.086%     |
-| SPOTVGT1 (100 tiles)          | Enabled (radius=1, closing=1, guard_rel=0.5, aod_rel=0.8) | 22,960 / 23,573,781 | 0.097% (+13.5%) |
-
-: Full-scene Bit 3 flagged-fraction results, before/after morphology
-
-Enabling morphology increases the flagged fraction by a modest, bounded ~11-14% (as expected from a 1-pixel dilation/closing plus the guard condition, rather than unconstrained growth), with negligible performance impact (the `flag_aodgrad` processing phase remained ~0.01-0.02 s/tile).
 
 ## F.2 `debug` Terrain Diagnostics
 
@@ -2704,11 +2688,15 @@ When `debug = True`:
 - `process.py` stores this as `ds_out['slope_deg']`, and keeps `elev`/`Delev` in the pickled per-tile dataset.
 - `save_nc_batch()` (in [fdr4vgt/in_out.py](../fdr4vgt/in_out.py)) writes three extra output variables:
 
-| Variable                       | Description                                    |
-|---------------------------------|------------------------------------------------|
-| `terrain_slope_degrees`          | Terrain slope, in degrees                       |
-| `terrain_elevation_m`            | Terrain elevation (from the DEM), in meters     |
-| `terrain_delta_elevation_m`      | Terrain elevation uncertainty (`Delev`), in meters |
++-----------------------------+----------------------------------------------------+
+| Variable                    | Description                                        |
++=============================+====================================================+
+| `terrain_slope_degrees`     | Terrain slope, in degrees                          |
++-----------------------------+----------------------------------------------------+
+| `terrain_elevation_m`       | Terrain elevation (from the DEM), in meters        |
++-----------------------------+----------------------------------------------------+
+| `terrain_delta_elevation_m` | Terrain elevation uncertainty (`Delev`), in meters |
++-----------------------------+----------------------------------------------------+
 
 : Debug-mode terrain diagnostic output variables
 
@@ -2721,6 +2709,5 @@ When `debug = True`:
 **Fix:** chunk height/width are now clamped per tile as `(min(chunks_size, height), min(chunks_size, width))`, computed once near the top of `save_nc_batch()` and reused at all five `createVariable()` call sites.
 
 **Validation:** confirmed on the `test_all_files.json` batch (7 scenes: `probav_1/2/3`, `spotvgt1_1/2/3/4`), where `probav_1` (tile X08Y00) and `probav_3` (tile X00Y00) previously failed with the chunk-size error on narrow edge tiles; the fix resolves the crash without altering output data for interior tiles (which already matched the configured chunk size).
-
 
 **Contractual outputs for FDR4VGT:** for this ATBD, the contractual kernel-facing outputs are the reflectance (`rTOC`, `rTOC_0`), the Jacobians (`Jrtoa`, `Juo3`, `Juh2o`, `Jpre`, `Jtau550`), and the aerosol spread (`UrTOC_ens`). Host-side uncertainty terms (`Duh2o`, `Duo3`, `Drtoa`, `Dpre`, `Dtaup`) are combined with these Jacobians in the uncertainty propagation equation of Section 5. This appendix defines the implementation API used by the operational chain and should be updated if the upstream HYGEOS `smaccl` API changes.
