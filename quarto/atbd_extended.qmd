@@ -272,7 +272,8 @@ This v1.1 revision keeps the full v1.0 content below **unchanged** and adds the 
 This v1.2 revision keeps the full v1.0/v1.1 content below **unchanged** and adds the following new material:
 
 - **Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix** — a two-stage risk mask (Seed OR (Dilated Seed AND Guard)) replacing the single-threshold AOD-gradient criterion for quality-flag Bit 3, the `debug=True` terrain diagnostic output variables, and the HDF5 chunksize clamp fix for narrow edge tiles.
-- An **enhancement note** on quality-flag Bit 3 (High AOD gradient): MERRA AOD high-value thresholding alone leaves gradient "halos" around high-AOD pixels that are under-flagged at their core; the implementation now supports a native-MERRA-grid gradient source, a robust (median/MAD-based) threshold option, and an optional morphological dilation+guard step. See Appendix F.1 and the note under Effect/Bit 3 in the Level 2A Output Variables section.
+- An **enhancement note** on quality-flag Bit 3 (High AOD gradient): MERRA AOD high-value thresholding alone leaves gradient "halos" around high-AOD pixels that are under-flagged at their core; the implementation now supports a native-MERRA-grid gradient source, a robust (median/MAD-based) threshold option, and an optional morphological dilation+guard step. The robust threshold is now computed once per scene from the full cached native-grid gradient (instead of per tile), and a separately-calibrated `aodmax_grad_native` constant is used for the `fixed` method when `aod_grad_source=merra_native`. See Appendix F.1 and the note under Effect/Bit 3 in the Level 2A Output Variables section.
+- A **correction** to quality-flag Bit 1 (High AOD): the criterion now compares the MERRA-2 interpolated AOD@550 actually used in the retrieval (`AOD_550_used`, internally `TOTEXTTAU`) against `aodmax`, instead of the maximum TOA reflectance across bands, which was only a loose proxy for aerosol loading. See the note under Effect/Bit 1 in the Level 2A Output Variables section.
 - A **new `debug` configuration option** (\[Options\] `debug`, default `False`) that adds three diagnostic output variables — `terrain_slope_degrees`, `terrain_elevation_m`, `terrain_delta_elevation_m` — to help diagnose terrain-uncertainty behavior. See Appendix F.2.
 - A **bug-fix note** on `save_nc_batch` (in_out.py): HDF5 chunk sizes are now clamped to the tile's actual height/width, fixing a `ValueError: chunksize cannot exceed dimension size` crash on narrow edge tiles smaller than the configured chunk size. See Appendix F.3.
 
@@ -1684,7 +1685,7 @@ The standard outputs of AC module are:
 
   - Bit 0 : cloud \_contaminated (clm != 0)
 
-  - Bit 1 : High AOD (max(TOA bands) \>= `aodmax`, default 0.6)
+  - Bit 1 : High AOD (`AOD_550_used` \>= `aodmax`, default 0.6)
 
   - Bit 2 : High SZA (sza \> 80.)
 
@@ -1697,6 +1698,8 @@ The standard outputs of AC module are:
   - Bit 6 : Out of LUT range
 
 For implementation consistency, a single AOD threshold parameter `aodmax` is used in configuration and propagated to the SMAC-CL internal high-AOD threshold (`taot`) at runtime. Therefore, both the internal SMAC-CL high-AOD process flag and the project quality criterion use the same numerical limit.
+
+> **Implementation Note (v1.2):** Bit 1 now compares the MERRA-2 interpolated AOD@550 actually used in the retrieval (`TOTEXTTAU`, output as `AOD_550_used`) against `aodmax`, rather than the maximum TOA reflectance across bands. The reflectance-based criterion was only an indirect proxy for aerosol loading (reflectance is also driven by surface type, sun-view geometry, etc.), whereas the AOD-based criterion directly reflects the quantity the threshold name ("High AOD") describes and is consistent with the input used elsewhere in the aerosol-correction chain.
 
 The gradient-based flag uses:
 
@@ -1901,7 +1904,7 @@ Standard outputs variables (TOC-reflectances and total associated uncertainties)
 **Quality Flags:**
 
 - Bit 0: Cloud-contaminated pixel
-- Bit 1: High AOD (max(TOA bands) \>= `aodmax`, default 0.6)
+- Bit 1: High AOD (`AOD_550_used` \>= `aodmax`, default 0.6; v1.2, see note under Effect/Bit 1 above)
 - Bit 2: High SZA (SZA \> `szamax`, default 80°)
 - Bit 3: High AOD gradient — two-stage risk mask `Seed OR (DilatedSeed AND Guard)` (v1.2, see Appendix F.1); Seed is `aod_grad` \> `aodmax_grad` (default 1.4e-4, fixed or robust threshold)
 - Bit 4: AC algorithm failure (reserved in current implementation)
@@ -2149,7 +2152,7 @@ plt.close(fig)
 # Full-scene boolean maps: one panel per raised quality bit.
 bit_definitions = {
   0: "Cloud contaminated (clm != 0)",
-  1: f"High AOD (max(TOA) >= aodmax={qf_aodmax:g})",
+  1: f"High AOD (AOD_550_used >= aodmax={qf_aodmax:g})",
   2: f"High SZA (SZA > szamax={qf_szamax:g}°)",
   3: f"High AOD gradient (aod_grad > aodmax_grad={qf_aodmax_grad:.2e})",
   4: "AC algorithm failure",
@@ -2645,8 +2648,8 @@ This appendix documents three implementation changes made after v1.1: an enhance
 $$Bit3 = Seed \lor (DilatedSeed \land Guard)$$
 
 - **Seed** — the existing gradient criterion, $aod\_grad > aodmax\_grad$ (Section "Level 2A Output Variables"), with two threshold variants:
-  - *fixed*: a constant `aodmax_grad` (default 1.4e-4).
-  - *robust*: $\max(floor,\ median + k \cdot 1.4826 \cdot MAD,\ quantile(q))$, computed on the AOD-gradient field, which adapts to the local/scene noise level instead of a single global constant.
+  - *fixed*: a constant threshold. When `aod_grad_source=merra_native`, this is `aodmax_grad_native` (default 0.15) rather than `aodmax_grad` (default 1.4e-4): the native-MERRA-grid gradient is an index-based derivative on the ~0.5-0.625° MERRA-2 grid and is ~2-3 orders of magnitude larger in typical magnitude than the legacy interpolated-grid gradient that `aodmax_grad` was calibrated for (observed scene stats: median ~0.04, p99 ~0.17), so reusing `aodmax_grad` as-is flagged ~100% of pixels and made Bit 3 useless as a discriminator. For `aod_grad_source=legacy`, `aodmax_grad` is used as before.
+  - *robust*: $\max(floor,\ median + k \cdot 1.4826 \cdot MAD,\ quantile(q))$, computed on the AOD-gradient field, which adapts to the local/scene noise level instead of a single global constant. This threshold is computed **once per scene**, from the full cached native-grid `AOD_GRAD_NATIVE` grid (in `process_batched()`), rather than per tile: per-tile robust statistics were found to be self-masking, since a tile overlapping the scene's strongest real gradient feature has its own median/MAD inflated by that very feature, which raises its local bar and hides the feature it should flag. A per-tile fallback (identical recipe, computed on the tile's own `aod_grad`) is used in `build_flag()` only when the scene-wide value is unavailable (e.g., the ancillary cache is disabled).
 - **Dilated Seed** — a morphological dilation (with an optional closing) of the Seed mask, to catch adjacent halo-ring pixels that fall below the Seed threshold.
 - **Guard** — prevents the dilation from over-growing the flagged area; requires either a moderate gradient (relative to `aodmax_grad`) or an elevated interpolated AOD (relative to a threshold), so that dilated pixels are only kept where there is still supporting evidence of aerosol contamination.
 
@@ -2660,6 +2663,8 @@ $$Bit3 = Seed \lor (DilatedSeed \land Guard)$$
 | `aod_grad_source`                  | `merra_native` (compute gradient on native MERRA-2 grid) or `legacy` (interpolated AOD, then gradient) | `merra_native`      |
 +------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
 | `aod_grad_threshold_method`        | `fixed` or `robust`                                                                                    | `robust`            |
++------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| `aodmax_grad_native`               | Fixed-method threshold used when `aod_grad_source=merra_native` (see Seed description above)           | `0.15`              |
 +------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
 | `aod_grad_robust_k`                | Robust threshold MAD multiplier *k*                                                                    | `3.0`               |
 +------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
