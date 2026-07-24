@@ -31,7 +31,7 @@ fontsize: 11pt
 
 ## Atmospheric Correction ATBD {.unnumbered .unlisted}
 
-**Date Issued:** 23.07.2026\
+**Date Issued:** 24.07.2026\
 **Issue:** I1.1
 
 > Ref: FDR4VGT-processing-AC-ATBD_v1.1
@@ -46,13 +46,10 @@ Contributors
 
 History of modifications
 
-+-------------+------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+
-| **Version** | **Date**   | **Description of modification**                                                                                                                                                                                                    | **Chapters / Sections**            |
-+:============+:===========+:===================================================================================================================================================================================================================================+:===================================+
-| V1.0        | 15/01/2026 | Draft Initial version                                                                                                                                                                                                              | All                                |
-+-------------+------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+
-| V1.1        | 23/07/2026 | Implementation notes, performance optimizations, float32 overflow fix, known limitations, SMACCL OpenCL kernel API, AOD gradient halo detection (Bit 3 quality flag), debug=True terrain diagnostics, HDF5 chunksize edge-tile fix | Appendix D, Appendix E, Appendix F |
-+-------------+------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+
+| **Version** | **Date**   | **Description of modification** | **Chapters / Sections** |
+|:------------|:-----------|:---------------------------------|:-------------------------|
+| V1.0 | 15/01/2026 | Draft Initial version | All |
+| V1.1 | 24/07/2026 | Implementation notes, performance optimizations, float32 overflow fix, known limitations, SMACCL OpenCL kernel API, AOD gradient halo detection (Bit 3 quality flag), debug=True terrain diagnostics, HDF5 chunksize edge-tile fix, terrain preprocessing controls (interpolated-DEM slope/aspect, configurable `Horn`/`Florinsky` method, optional Gaussian pre-smoothing), DEM no-data nearest-valid-fill fix (removes spurious stripe/ring artefacts in `uncertainty_from_pressure`/`uncertainty_from_RTM_terrain`), terrain tile-boundary halo fix, and an AOD-slope criterion for quality-flag Bit 3 (variable-width coverage of the true high-AOD transition zone, replacing the coarse native-grid gradient criterion's incomplete boundary tracing) | Appendix D, Appendix E, Appendix F |
 
 Related documents
 
@@ -264,11 +261,15 @@ This v1.1 revision keeps the full v1.0 content below **unchanged** and adds the 
 - **Appendix E: SMACCL OpenCL Kernel API** — the Python host wrapper API (`Smaccl.run`), the OpenCL kernel signature (`devicecl.cl`), the output variable mapping, and the `ISmaccl` product-level wrapper API, as implemented in the HYGEOS `smaccl` repository.
 - A **critical bug-fix note** on surface pressure computation: `SLP` and `T10M` must be stored as float32 (not float16) in the ancillary cache to avoid overflow in `log(R·T)` (see Appendix D.2 and the note under Effect 4: Surface Pressure Uncertainty).
 - Confirmation that **DEM interpolation** uses linear interpolation (an improvement over the nearest-neighbor method originally specified), and that **adjacency effects** and **Köppen-Geiger regionalization** are, respectively, a known limitation and a planned feature.
-- **Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix** — a two-stage risk mask (Seed OR (Dilated Seed AND Guard)) replacing the single-threshold AOD-gradient criterion for quality-flag Bit 3, the `debug=True` terrain diagnostic output variables, and the HDF5 chunksize clamp fix for narrow edge tiles.
+- **Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, Tile Chunking Fix, Terrain Preprocessing, and AOD-Slope Criterion** — a two-stage risk mask (Seed OR (Dilated Seed AND Guard)) replacing the single-threshold AOD-gradient criterion for quality-flag Bit 3, the `debug=True` terrain diagnostic output variables, the HDF5 chunksize clamp fix for narrow edge tiles, configurable terrain slope/aspect preprocessing (interpolated-DEM, `Horn`/`Florinsky` method, optional Gaussian pre-smoothing), a DEM no-data nearest-valid-fill fix, a terrain tile-boundary halo fix, and a new AOD-slope criterion for Bit 3.
 - An **enhancement note** on quality-flag Bit 3 (High AOD gradient): MERRA AOD high-value thresholding alone leaves gradient "halos" around high-AOD pixels that are under-flagged at their core; the implementation now supports a native-MERRA-grid gradient source, a robust (median/MAD-based) threshold option, and an optional morphological dilation+guard step. The robust threshold is now computed once per scene from the full cached native-grid gradient (instead of per tile), and a separately-calibrated `aodmax_grad_native` constant is used for the `fixed` method when `aod_grad_source=merra_native`. See Appendix F.1 and the note under Effect/Bit 3 in the Level 2A Output Variables section.
 - A **correction** to quality-flag Bit 1 (High AOD): the criterion now compares the MERRA-2 interpolated AOD\@550 actually used in the retrieval (`AOD_550_used`, internally `TOTEXTTAU`) against `aodmax`, instead of the maximum TOA reflectance across bands, which was only a loose proxy for aerosol loading. See the note under Effect/Bit 1 in the Level 2A Output Variables section.
 - A **new `debug` configuration option** (\[Options\] `debug`, default `False`) that adds three diagnostic output variables — `terrain_slope_degrees`, `terrain_elevation_m`, `terrain_delta_elevation_m` — to help diagnose terrain-uncertainty behavior. See Appendix F.2.
 - A **bug-fix note** on `save_nc_batch` (in_out.py): HDF5 chunk sizes are now clamped to the tile's actual height/width, fixing a `ValueError: chunksize cannot exceed dimension size` crash on narrow edge tiles smaller than the configured chunk size. See Appendix F.3.
+- **Terrain preprocessing controls:** clarification that terrain slope/aspect used in `slope_err` are computed on the **DEM interpolated on the sensor grid** (not the native DEM grid), plus new configurable `[Options]` controls — `terrain_slope_method` (`Horn` or `Florinsky`) and `terrain_gaussian_sigma` (optional Gaussian pre-smoothing of the interpolated DEM before slope/aspect) — and removal of a hardcoded slope resolution constant in favor of the configured `sensor_spatial_resolution_m`. See Appendix F.4.
+- **DEM no-data fill fix:** invalid/no-data DEM pixels (ocean, lakes, DEM gaps) are now filled with the value of their **nearest valid neighbor** instead of a single global constant before computing slope/aspect/`Delev`, removing spurious stripe artefacts in `uncertainty_from_pressure` and ring/arc artefacts in `uncertainty_from_RTM_terrain` that a global-constant fill had created at the boundary of every invalid region. See Appendix F.5.
+- **Terrain tile-boundary fix:** the optional Gaussian pre-smoothing of the interpolated DEM (`terrain_gaussian_sigma`) is now applied with a per-tile halo sized to the configured sigma, instead of a fixed 1-pixel halo, removing a spurious periodic discontinuity previously introduced at every processing tile boundary. A persistent terrain-uncertainty hotspot investigated in the same review was confirmed to be a real mountain ridge (elevation up to ~2620 m, a smooth physically-coherent slope profile), not an artefact. See Appendix F.6.
+- **New AOD-slope criterion for quality-flag Bit 3:** the existing gradient-based Bit 3 criterion uses a coarse native-MERRA-grid gradient that only loosely traces the true AOD transition on the fine sensor grid (measured recall of the true `aodmax` boundary: ≈11%). A new criterion flags wherever the **fine sensor-grid AOD slope** exceeds a scene-adaptive threshold, so the flagged region naturally covers the full, variable width of the transition zone (median flagged-band width 1 pixel, 90th-percentile 11 pixels, up to 566 pixels for the broadest gradual transition), increasing total Bit 3 coverage from 125,352 to 589,099 pixels on the validation scene. See Appendix F.7.
 
 # Input and Auxiliary Data
 
@@ -1932,27 +1933,32 @@ from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 import xarray as xr
 
-THUMB_SIZE = 50
+THUMB_SIZE = 100
 BANDS = ["B1", "B2", "B3", "B4"]
 
 
-def read_output_path(config_file="../fdr4vgt/probav_config.cfg"):
+def read_output_path(config_file="../tests/all_process_spotvgt1_2.cfg"):
   cf = configparser.ConfigParser()
   cf.read(config_file)
   return cf["Paths"]["output"]
 
 
-def read_quality_thresholds(config_file="../fdr4vgt/probav_config.cfg"):
+def read_quality_thresholds(config_file="../tests/all_process_spotvgt1_2.cfg"):
   cf = configparser.ConfigParser()
   cf.read(config_file)
   coeffs = cf["Coefficients"]
   aodmax = float(coeffs.get("aodmax", coeffs.get("aotmax", 0.6)))
   szamax = float(coeffs.get("szamax", 80.0))
   aodmax_grad = float(coeffs.get("aodmax_grad", coeffs.get("aod_max_grad", 1.4e-4)))
+  options = cf["Options"] if cf.has_section("Options") else {}
+  aod_contour_grad_k = float(options.get("aod_contour_grad_k", 2.0))
+  aod_contour_grad_quantile = float(options.get("aod_contour_grad_quantile", 0.90))
   return {
     "aodmax": aodmax,
     "szamax": szamax,
     "aodmax_grad": aodmax_grad,
+    "aod_contour_grad_k": aod_contour_grad_k,
+    "aod_contour_grad_quantile": aod_contour_grad_quantile,
   }
 
 
@@ -1964,6 +1970,23 @@ def crop_thumbnail(ds, center, size=THUMB_SIZE):
   row, col = center
   half = size // 2
   return ds.isel(height=slice(row - half, row - half + size), width=slice(col - half, col - half + size)).compute()
+
+
+def thumbnail_center_from_max_aod(ds, size=THUMB_SIZE):
+  half = size // 2
+  aod = np.asarray(ds["AOD_550_used"].compute().values).astype(float)
+  valid = np.isfinite(aod)
+  if not np.any(valid):
+    h, w = aod.shape
+    return h // 2, w // 2
+
+  aod_valid = np.where(valid, aod, -np.inf)
+  row, col = np.unravel_index(np.nanargmax(aod_valid), aod_valid.shape)
+
+  h, w = aod.shape
+  row = int(np.clip(row, half, h - (size - half)))
+  col = int(np.clip(col, half, w - (size - half)))
+  return row, col
 
 
 def cloud_mask(ds):
@@ -1996,18 +2019,20 @@ def shared_limits(arrays, mask=None):
   return float(np.min(vals)), float(np.max(vals))
 
 
-nc_path = read_output_path()
-quality_thresholds = read_quality_thresholds()
+config_path = "../tests/all_process_spotvgt1_2.cfg"
+nc_path = read_output_path(config_path)
+quality_thresholds = read_quality_thresholds(config_path)
 qf_aodmax = quality_thresholds["aodmax"]
 qf_szamax = quality_thresholds["szamax"]
 qf_aodmax_grad = quality_thresholds["aodmax_grad"]
+print("Config file:", config_path)
 print("Output NetCDF:", nc_path)
 print(
   f"Quality thresholds from cfg: aodmax={qf_aodmax:g}, "
   f"szamax={qf_szamax:g}, aodmax_grad={qf_aodmax_grad:.2e}"
 )
 ds_full = open_output(nc_path)
-center = (3029, 646)
+center = thumbnail_center_from_max_aod(ds_full, size=THUMB_SIZE)
 print(f"Thumbnail centered at (row={center[0]}, col={center[1]}), size={THUMB_SIZE}x{THUMB_SIZE}")
 thumb = crop_thumbnail(ds_full, center, size=THUMB_SIZE)
 mask = cloud_mask(thumb)
@@ -2029,14 +2054,20 @@ jacobians = {
   "AOD": "Jacobian_Rtoc_vs_AOD_",
 }
 
-jac_limits = {}
+jacobians_available = {}
 for name, prefix in jacobians.items():
-  jac_limits[name] = shared_limits([thumb[f"{prefix}{band}"] for band in BANDS], mask)
+  vars_present = [f"{prefix}{band}" for band in BANDS if f"{prefix}{band}" in thumb]
+  if vars_present:
+    jacobians_available[name] = (prefix, vars_present)
+
+jac_limits = {}
+for name, (_, vars_present) in jacobians_available.items():
+  jac_limits[name] = shared_limits([thumb[var] for var in vars_present], mask)
 
 panels = []
 for band in BANDS:
-  panels.append((thumb[f"Rtoc_{band}"], f"Rtoc {band}", "Greys_r", 0.0, 0.4, "", "%.2f"))
-  for name, prefix in jacobians.items():
+  panels.append((thumb[f"Rtoc_{band}"], f"Rtoc {band}", "jet", 0.0, 0.6, "", "%.2f"))
+  for name, (prefix, _) in jacobians_available.items():
     jvmin, jvmax = jac_limits[name]
     panels.append((thumb[f"{prefix}{band}"], f"J({name}) {band}", "jet", jvmin, jvmax, "", "%.2e"))
 
@@ -2047,7 +2078,10 @@ for i, (data, title, cmap, vmin, vmax, cbar_label, cbar_fmt) in enumerate(panels
   imshow_panel(axes[i], data, title, cmap=cmap, mask=mask, vmin=vmin, vmax=vmax, cbar_label=cbar_label, cbar_fmt=cbar_fmt)
 for i in range(len(panels), len(axes)):
   axes[i].axis("off")
-fig.suptitle(f"TOC reflectances and Jacobians ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=14)
+if jacobians_available:
+  fig.suptitle(f"TOC reflectances and Jacobians ({THUMB_SIZE}x{THUMB_SIZE} px)", fontsize=14)
+else:
+  fig.suptitle(f"TOC reflectances ({THUMB_SIZE}x{THUMB_SIZE} px, Jacobians disabled in cfg)", fontsize=14)
 fig.savefig("figure37_rtoc_jacobians.png", dpi=180, bbox_inches="tight")
 plt.close(fig)
 
@@ -2098,18 +2132,17 @@ fig.savefig("figure38_uncertainties.png", dpi=180, bbox_inches="tight")
 plt.close(fig)
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 4.8), constrained_layout=True)
-# Quality flag: discrete colormap over full 7-bit range (0–127)
+# Quality flag: discrete 0-10 scale
 qf_data = np.asarray(thumb["Quality_flag"]).astype(int)
 qf_mask = np.asarray(mask)
-qf_display = np.where(qf_mask, np.nan, qf_data)
-# Build a strict 128-class discrete colormap (one color per bitfield value).
-hues = np.linspace(0.0, 1.0, 128, endpoint=False)
-cmap_qf = mcolors.ListedColormap(plt.cm.hsv(hues))
-norm_qf = mcolors.BoundaryNorm(np.arange(-0.5, 128.5, 1.0), cmap_qf.N)
+qf_display = np.where(qf_mask, np.nan, np.clip(qf_data, 0, 10))
+qf_colors = plt.get_cmap("tab20", 11)(np.arange(11))
+cmap_qf = mcolors.ListedColormap(qf_colors)
+norm_qf = mcolors.BoundaryNorm(np.arange(-0.5, 11.5, 1.0), cmap_qf.N)
 im_qf = axes[0].imshow(qf_display, cmap=cmap_qf, norm=norm_qf, interpolation="nearest")
-axes[0].set_title("Quality flag (bitfield, 0–127)", fontsize=9)
+axes[0].set_title("Quality flag (discrete scale 0-10)", fontsize=9)
 axes[0].axis("off")
-cbar_qf = plt.colorbar(im_qf, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 128, 8))
+cbar_qf = plt.colorbar(im_qf, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 11, 1))
 cbar_qf.ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 cbar_qf.set_label("flag value", fontsize=8)
 imshow_panel(axes[1], thumb["AOD_550_used"], "AOD @ 550 nm used", cmap="jet", cbar_label="AOD")
@@ -2121,14 +2154,14 @@ plt.close(fig)
 qf_full = ds_full["Quality_flag"].compute().values.astype(int)
 aod_full = ds_full["AOD_550_used"].compute().values.astype(float)
 mask_full = (ds_full["clm"].compute().values > 1e6)
-qf_full_display = np.where(mask_full, np.nan, qf_full)
+qf_full_display = np.where(mask_full, np.nan, np.clip(qf_full, 0, 10))
 aod_full_display = np.where(mask_full, np.nan, aod_full)
 
 fig, axes = plt.subplots(1, 2, figsize=(16, 5.2), constrained_layout=True)
 im_qf_full = axes[0].imshow(qf_full_display, cmap=cmap_qf, norm=norm_qf, interpolation="nearest")
-axes[0].set_title("Quality flag (full scene, bitfield 0–127)", fontsize=9)
+axes[0].set_title("Quality flag (full scene, discrete scale 0-10)", fontsize=9)
 axes[0].axis("off")
-cbar_qf_full = plt.colorbar(im_qf_full, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 128, 8))
+cbar_qf_full = plt.colorbar(im_qf_full, ax=axes[0], fraction=0.046, pad=0.04, ticks=np.arange(0, 11, 1))
 cbar_qf_full.ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 cbar_qf_full.set_label("flag value", fontsize=8)
 
@@ -2140,6 +2173,51 @@ cbar_aod_full.set_label("AOD", fontsize=8)
 
 fig.suptitle("Full-scene quality flags and AOD@550 consistency view", fontsize=12)
 fig.savefig("figure40_fullscene_flags_aod.png", dpi=180, bbox_inches="tight")
+plt.close(fig)
+
+# Full-scene view of pressure and terrain uncertainty (max over bands), to make
+# the DEM nearest-valid-fill fix (Appendix F.5) visible at scene scale -- the
+# thumbnail crops above are too small to reliably contain the reported
+# stripe/ring artefacts.
+fig, axes = plt.subplots(1, 2, figsize=(16, 5.2), constrained_layout=True)
+has_pressure_terrain = all(f"{prefix}{band}" in ds_full for prefix in ["uncertainty_from_pressure_", "uncertainty_from_RTM_terrain_"] for band in BANDS)
+if has_pressure_terrain:
+  unc_ps_full = np.nanmax(np.stack([ds_full[f"uncertainty_from_pressure_{band}"].compute().values for band in BANDS]), axis=0)
+  unc_terrain_full = np.nanmax(np.stack([ds_full[f"uncertainty_from_RTM_terrain_{band}"].compute().values for band in BANDS]), axis=0)
+  unc_ps_display = np.where(mask_full, np.nan, unc_ps_full)
+  unc_terrain_display = np.where(mask_full, np.nan, unc_terrain_full)
+
+  # Robust color scale (1st-99th percentile of finite values): a handful of
+  # extreme outlier pixels would otherwise saturate a min/max scale and hide
+  # the spatial pattern (including any residual stripe/ring artefact) under a
+  # uniform low-contrast color.
+  def _robust_vrange(arr):
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+      return 0.0, 1.0
+    return float(np.nanpercentile(finite, 1)), float(np.nanpercentile(finite, 99))
+
+  ps_vmin, ps_vmax = _robust_vrange(unc_ps_display)
+  terrain_vmin, terrain_vmax = _robust_vrange(unc_terrain_display)
+  print(f"uncertainty_from_pressure full-scene: min={np.nanmin(unc_ps_display):.4g} p1={ps_vmin:.4g} p99={ps_vmax:.4g} max={np.nanmax(unc_ps_display):.4g}")
+  print(f"uncertainty_from_RTM_terrain full-scene: min={np.nanmin(unc_terrain_display):.4g} p1={terrain_vmin:.4g} p99={terrain_vmax:.4g} max={np.nanmax(unc_terrain_display):.4g}")
+
+  im_ps_full = axes[0].imshow(unc_ps_display, cmap="jet", vmin=ps_vmin, vmax=ps_vmax, interpolation="nearest")
+  axes[0].set_title("uncertainty_from_pressure (full scene, max over bands, 1st-99th pct)", fontsize=9)
+  axes[0].axis("off")
+  plt.colorbar(im_ps_full, ax=axes[0], fraction=0.046, pad=0.04, label="reflectance")
+
+  im_terrain_full = axes[1].imshow(unc_terrain_display, cmap="jet", vmin=terrain_vmin, vmax=terrain_vmax, interpolation="nearest")
+  axes[1].set_title("uncertainty_from_RTM_terrain (full scene, max over bands, 1st-99th pct)", fontsize=9)
+  axes[1].axis("off")
+  plt.colorbar(im_terrain_full, ax=axes[1], fraction=0.046, pad=0.04, label="reflectance")
+else:
+  for ax, label in zip(axes, ["uncertainty_from_pressure", "uncertainty_from_RTM_terrain"]):
+    ax.text(0.5, 0.5, f"{label} not available\n(jacobian=False in config)", ha="center", va="center", fontsize=10)
+    ax.axis("off")
+
+fig.suptitle("Full-scene pressure and terrain uncertainty (DEM no-data fill fix, Appendix F.5)", fontsize=12)
+fig.savefig("figure42_fullscene_pressure_terrain_uncertainty.png", dpi=180, bbox_inches="tight")
 plt.close(fig)
 
 # Full-scene boolean maps: one panel per raised quality bit.
@@ -2200,6 +2278,70 @@ if raised_bits:
     cbar.set_label("bit raised", fontsize=8)
     fig.savefig(f"figure41_fullscene_quality_bit{bit}.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
+
+# Bit 3 decomposition: pre-existing gradient criterion (native-MERRA-grid
+# based, Appendix F.1) vs the new "AOD slope" contour criterion (Appendix
+# F.7). The slope criterion flags a VARIABLE-WIDTH band wherever the fine
+# sensor-grid AOD gradient exceeds a data-driven threshold -- not a
+# fixed-width ring -- so its extent is recomputed here (as a close
+# approximation of the production `aod_grad_fine`) directly from the full
+# scene `AOD_550_used` field for illustration.
+bit3_full = ((qf_full & (1 << 3)) != 0) & ~mask_full
+
+aod_fill_full = np.where(np.isfinite(aod_full), aod_full, np.nanmedian(aod_full[np.isfinite(aod_full)]))
+_dy, _dx = np.gradient(aod_fill_full)
+aod_grad_fine_full = np.sqrt(_dy ** 2 + _dx ** 2)
+aod_grad_fine_full = np.where(np.isfinite(aod_full), aod_grad_fine_full, np.nan)
+
+_valid_fine = np.isfinite(aod_grad_fine_full)
+_gf = aod_grad_fine_full[_valid_fine]
+_med_f = np.median(_gf)
+_sigma_f = 1.4826 * np.median(np.abs(_gf - _med_f))
+_k_f = quality_thresholds["aod_contour_grad_k"]
+_q_f = quality_thresholds["aod_contour_grad_quantile"]
+_thr_fine = max(float(_med_f + _k_f * _sigma_f), float(np.quantile(_gf, _q_f)))
+
+aod_contour_mask = _valid_fine & (aod_grad_fine_full > _thr_fine) & ~mask_full
+
+bit3_gradient_only = bit3_full & ~aod_contour_mask
+bit3_contour_component = bit3_full & aod_contour_mask
+
+high_aod_full = np.isfinite(aod_full) & (aod_full >= qf_aodmax) & ~mask_full
+from scipy.ndimage import binary_dilation as _bd, binary_erosion as _be
+_struct3 = np.ones((3, 3), dtype=bool)
+aod_contour_ring = _bd(high_aod_full, structure=_struct3) & ~_be(high_aod_full, structure=_struct3)
+contour_recall_pct = 100.0 * float((bit3_full & aod_contour_ring).sum()) / max(1, int(aod_contour_ring.sum()))
+
+print(
+  f"Bit3 total={int(bit3_full.sum())}, gradient-only={int(bit3_gradient_only.sum())}, "
+  f"slope-contour-component={int(bit3_contour_component.sum())}, aodmax-boundary recall={contour_recall_pct:.1f}%, "
+  f"slope threshold used={_thr_fine:.4g}"
+)
+
+ys_aod, xs_aod = np.where(high_aod_full)
+if ys_aod.size:
+  _y0, _y1 = max(0, ys_aod.min() - 20), min(aod_full.shape[0], ys_aod.max() + 20)
+  _x0, _x1 = max(0, xs_aod.min() - 20), min(aod_full.shape[1], xs_aod.max() + 20)
+
+  combo = np.zeros(aod_full.shape, dtype=np.int8)
+  combo[bit3_gradient_only] = 1
+  combo[bit3_contour_component] = 2
+  cmap_combo = mcolors.ListedColormap(["#f0f0f0", "#1f77b4", "#d62728"])
+  norm_combo = mcolors.BoundaryNorm([-0.5, 0.5, 1.5, 2.5], cmap_combo.N)
+
+  fig, ax = plt.subplots(1, 1, figsize=(9.0, 7.2), constrained_layout=True)
+  im_combo = ax.imshow(combo[_y0:_y1, _x0:_x1], cmap=cmap_combo, norm=norm_combo, interpolation="nearest")
+  ax.set_title(
+    f"Bit 3 decomposition (zoomed on AOD>=aodmax={qf_aodmax:g} zone)\n"
+    f"blue=native-grid gradient criterion ({int(bit3_gradient_only.sum())} px), "
+    f"red=new AOD-slope criterion ({int(bit3_contour_component.sum())} px, variable width)",
+    fontsize=10,
+  )
+  ax.axis("off")
+  cbar_combo = plt.colorbar(im_combo, ax=ax, ticks=[0, 1, 2], fraction=0.046, pad=0.04)
+  cbar_combo.ax.set_yticklabels(["none", "gradient", "AOD slope"])
+  fig.savefig("figure43_bit3_contour_decomposition.png", dpi=180, bbox_inches="tight")
+  plt.close(fig)
 ```
 
 ![](figure36_ancillary_inputs.png)
@@ -2216,15 +2358,23 @@ Figure 22: Uncertainty components for the 50x50 thumbnail.
 
 ![](figure39_flags_aod.png)
 
-Figure 23: Quality flag map and AOD\@550 used over the 50x50 thumbnail. The quality flag panel uses a strict 128-class discrete colormap (0-127).
+Figure 23: Quality flag map and AOD\@550 used over the 50x50 thumbnail centered on the scene maximum of `AOD_550_used`. The quality flag panel uses a discrete color scale from 0 to 10.
 
 ![](figure40_fullscene_flags_aod.png)
 
-Figure 24: Quality flag map and AOD\@550 used over the full scene. This view is used to check consistency between quality-flag bits and configured thresholds (`aodmax`, `aodmax_grad`).
+Figure 24: Quality flag map and AOD\@550 used over the full scene. The quality flag panel uses a discrete color scale from 0 to 10; values above 10 are clipped for display.
 
 ![](figure41_fullscene_quality_bits_boolean.png)
 
 Figure 25: Full-scene boolean maps for each raised quality-flag bit. Each panel shows where the corresponding bit is raised over the whole scene; Bit 1/2/3 criteria are tied to configured thresholds (`aodmax`, `szamax`, `aodmax_grad`).
+
+![](figure42_fullscene_pressure_terrain_uncertainty.png)
+
+Figure 26: Full-scene view of `uncertainty_from_pressure` and `uncertainty_from_RTM_terrain` (maximum over bands). Unlike Figures 20-23, which only cover a small thumbnail crop, this full-scene view is needed to check for the stripe/ring DEM-derivative artefacts described in Appendix F.5, since they may fall outside the thumbnail crop.
+
+![](figure43_bit3_contour_decomposition.png)
+
+Figure 27: Bit 3 decomposition, zoomed on the `AOD_550_used >= aodmax` zone: pixels flagged only by the pre-existing gradient criterion (blue) versus pixels flagged by the new `aod_contour_enable` boundary ring (red, Appendix F.7). The red ring traces the exact outline of the high-AOD zone; at full-scene zoom (Figure 25) this 1-pixel-wide addition is easy to miss next to the larger pre-existing gradient-flagged regions, which is why this dedicated, zoomed, per-component view is provided.
 
 The figures above replace the static screenshots in the previous ATBD version.
 
@@ -2628,84 +2778,83 @@ This extends the kernel outputs by including uncertainty-input terms (`D*`) comp
 
 If no compatible/available device is found, initialization fails.
 
-# Appendix F: AOD Gradient Halo Detection, Debug Diagnostics, and Tile Chunking Fix (NEW in v1.1)
+# Appendix F: Quality Flags, Terrain Preprocessing, and Diagnostics — Implementation Details
 
-This appendix documents three implementation changes made after v1.1: an enhanced two-stage detection scheme for quality-flag Bit 3 (High AOD gradient), an optional `debug` mode adding terrain-diagnostic output variables, and a bug fix for HDF5 chunk sizing on narrow edge tiles. As with Appendix D, these are engineering/implementation refinements and do not change the underlying AC physics described in Sections 1-10.
+This appendix describes implementation-level behavior controlled by configuration parameters: the Bit 3 quality-flag construction, terrain derivative preprocessing, debug diagnostic outputs, and HDF5 tile chunking. These are engineering details of the operational chain and do not change the underlying AC physics described in Sections 1-10.
 
 ## F.1 AOD Gradient Halo Detection (Quality-Flag Bit 3)
 
-**Motivation:** thresholding the MERRA AOD gradient at a single fixed value is often insufficient on its own. High-AOD plumes typically leave a "halo" of overestimated `Rtoc` around them, and the strongest AOD gradient is frequently found only at the edge of the halo, not at its core — so a pure gradient threshold under-flags the core and can miss halo pixels just below threshold. This is consistent with the aerosol-mask thresholding guidance in the PROBA-V C2 technical note on AOT masks (`PROBA-V_C2_TN_AOT_masks_V1.0.pdf`).
-
-**Design:** Bit 3 is raised by a two-stage risk mask:
+Bit 3 is raised by a two-stage risk mask:
 
 $$Bit3 = Seed \lor (DilatedSeed \land Guard)$$
 
-- **Seed** — the existing gradient criterion, $aod\_grad > aodmax\_grad$ (Section "Level 2A Output Variables"), with two threshold variants:
-  - *fixed*: a constant threshold. When `aod_grad_source=merra_native`, this is `aodmax_grad_native` (default 0.15) rather than `aodmax_grad` (default 1.4e-4): the native-MERRA-grid gradient is an index-based derivative on the \~0.5-0.625° MERRA-2 grid and is \~2-3 orders of magnitude larger in typical magnitude than the legacy interpolated-grid gradient that `aodmax_grad` was calibrated for (observed scene stats: median \~0.04, p99 \~0.17), so reusing `aodmax_grad` as-is flagged \~100% of pixels and made Bit 3 useless as a discriminator. For `aod_grad_source=legacy`, `aodmax_grad` is used as before.
-  - *robust*: $\max(floor,\ median + k \cdot 1.4826 \cdot MAD,\ quantile(q))$, computed on the AOD-gradient field, which adapts to the local/scene noise level instead of a single global constant. This threshold is computed **once per scene**, from the full cached native-grid `AOD_GRAD_NATIVE` grid (in `process_batched()`), rather than per tile: per-tile robust statistics were found to be self-masking, since a tile overlapping the scene's strongest real gradient feature has its own median/MAD inflated by that very feature, which raises its local bar and hides the feature it should flag. A per-tile fallback (identical recipe, computed on the tile's own `aod_grad`) is used in `build_flag()` only when the scene-wide value is unavailable (e.g., the ancillary cache is disabled).
-- **Dilated Seed** — a morphological dilation (with an optional closing) of the Seed mask, to catch adjacent halo-ring pixels that fall below the Seed threshold.
-- **Guard** — prevents the dilation from over-growing the flagged area; requires either a moderate gradient (relative to `aodmax_grad`) or an elevated interpolated AOD (relative to a threshold), so that dilated pixels are only kept where there is still supporting evidence of aerosol contamination.
+- **Seed** — $aod\_grad > aodmax\_grad$, with two threshold variants selected by `aod_grad_threshold_method`:
+  - `fixed`: a constant threshold. When `aod_grad_source=merra_native` (gradient computed on the native \~0.5-0.625° MERRA-2 grid), the threshold used is `aodmax_grad_native` (**default `0.15`**); when `aod_grad_source=legacy` (gradient of the sensor-grid-interpolated AOD), `aodmax_grad` (**default `1.4e-4`**) is used.
+  - `robust` (**default**): $\max(floor,\ median + k \cdot 1.4826 \cdot MAD,\ quantile(q))$, computed once per scene from the full cached native-grid gradient.
+- **Dilated Seed** — a morphological dilation (with optional closing) of the Seed mask.
+- **Guard** — requires either a moderate gradient (relative to `aodmax_grad`) or an elevated interpolated AOD (relative to a threshold) before a dilated pixel is kept.
 
-**Implementation:** `build_flag()` in [fdr4vgt/funcs.py](../fdr4vgt/funcs.py) computes the mask; the AOD gradient is computed on the native MERRA-2 grid and then interpolated to the sensor grid by `interp_merra_native_aod_grad()` in [fdr4vgt/process.py](../fdr4vgt/process.py) (as an alternative to the legacy path of interpolating AOD first and then differencing on the sensor grid).
+`build_flag()` in [fdr4vgt/funcs.py](../fdr4vgt/funcs.py) computes the mask; `interp_merra_native_aod_grad()` in [fdr4vgt/process.py](../fdr4vgt/process.py) computes the native-grid gradient.
 
-**Configuration knobs** (`[Coefficients]` section, `fdr4vgt/spotvgt1_config.cfg` and `fdr4vgt/probav_config.cfg`):
+**Configuration knobs** (`[Coefficients]`/`[Options]` sections):
 
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| Parameter                          | Meaning                                                                                                | Recommended default |
-+====================================+========================================================================================================+=====================+
-| `aod_grad_source`                  | `merra_native` (compute gradient on native MERRA-2 grid) or `legacy` (interpolated AOD, then gradient) | `merra_native`      |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_threshold_method`        | `fixed` or `robust`                                                                                    | `robust`            |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aodmax_grad_native`               | Fixed-method threshold used when `aod_grad_source=merra_native` (see Seed description above)           | `0.15`              |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_robust_k`                | Robust threshold MAD multiplier *k*                                                                    | `3.0`               |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_robust_quantile`         | Robust threshold quantile *q*                                                                          | `0.98`              |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_morph_enable`            | Enable dilation/closing + guard                                                                        | `True`              |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_morph_radius_px`         | Dilation structuring-element radius (pixels)                                                           | `1`                 |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_morph_closing_radius_px` | Morphological closing radius (pixels)                                                                  | `1`                 |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_morph_guard_rel`         | Guard: gradient threshold, relative to `aodmax_grad`                                                   | `0.5`               |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
-| `aod_grad_morph_aod_rel`           | Guard: AOD threshold, relative to a reference AOD level                                                | `0.8`               |
-+------------------------------------+--------------------------------------------------------------------------------------------------------+---------------------+
+| Parameter | Meaning | Default |
+|:----------|:--------|:--------|
+| `aod_grad_source` | `merra_native` or `legacy` | **`merra_native`** |
+| `aod_grad_threshold_method` | `fixed` or `robust` | **`robust`** |
+| `aodmax_grad_native` | Fixed-method threshold used when `aod_grad_source=merra_native` | **`0.15`** |
+| `aod_grad_robust_k` | Robust threshold MAD multiplier *k* | **`3.0`** |
+| `aod_grad_robust_quantile` | Robust threshold quantile *q* | **`0.98`** |
+| `aod_grad_morph_enable` | Enable dilation/closing + guard | **`True`** |
+| `aod_grad_morph_radius_px` | Dilation structuring-element radius (pixels) | **`1`** |
+| `aod_grad_morph_closing_radius_px` | Morphological closing radius (pixels) | **`1`** |
+| `aod_grad_morph_guard_rel` | Guard: gradient threshold, relative to `aodmax_grad` | **`0.5`** |
+| `aod_grad_morph_aod_rel` | Guard: AOD threshold, relative to a reference AOD level | **`0.8`** |
 
 : AOD gradient halo detection configuration knobs
 
 ## F.2 `debug` Terrain Diagnostics
 
-A new `[Options] debug` boolean configuration flag (default `False`) enables additional terrain diagnostic outputs, to help investigate cases where `uncertainty_from_terrain` appears too large.
+`[Options] debug` (**default `False`**) enables three extra output variables:
 
-When `debug = True`:
-
-- `get_slope_err()` (in [fdr4vgt/funcs.py](../fdr4vgt/funcs.py)) additionally returns the terrain slope in degrees.
-- `process.py` stores this as `ds_out['slope_deg']`, and keeps `elev`/`Delev` in the pickled per-tile dataset.
-- `save_nc_batch()` (in [fdr4vgt/in_out.py](../fdr4vgt/in_out.py)) writes three extra output variables:
-
-+-----------------------------+----------------------------------------------------+
-| Variable                    | Description                                        |
-+=============================+====================================================+
-| `terrain_slope_degrees`     | Terrain slope, in degrees                          |
-+-----------------------------+----------------------------------------------------+
-| `terrain_elevation_m`       | Terrain elevation (from the DEM), in meters        |
-+-----------------------------+----------------------------------------------------+
+| Variable | Description |
+|:---|:---|
+| `terrain_slope_degrees` | Terrain slope, in degrees |
+| `terrain_elevation_m` | Terrain elevation (from the DEM), in meters |
 | `terrain_delta_elevation_m` | Terrain elevation uncertainty (`Delev`), in meters |
-+-----------------------------+----------------------------------------------------+
 
 : Debug-mode terrain diagnostic output variables
 
-`debug` defaults to `False` in all shipped configuration files (`tests/*.cfg`, `tests/all_process_*.cfg`).
-
 ## F.3 HDF5 Chunk Size Clamp on Narrow Edge Tiles
 
-**Issue:** `save_nc_batch()` (in [fdr4vgt/in_out.py](../fdr4vgt/in_out.py)) previously created NetCDF variables with a fixed HDF5 chunk size (matching the configured `chunks_size`, e.g. 512 px) at all `createVariable()` call sites. Edge tiles narrower than the chunk size (e.g. 370 px wide) raised `ValueError: chunksize cannot exceed dimension size`.
+`save_nc_batch()` ([fdr4vgt/in_out.py](../fdr4vgt/in_out.py)) clamps the HDF5 chunk height/width per tile to `(min(chunks_size, height), min(chunks_size, width))`, so edge tiles narrower than the configured `chunks_size` (**default `512`**) do not exceed their own dimension size.
 
-**Fix:** chunk height/width are now clamped per tile as `(min(chunks_size, height), min(chunks_size, width))`, computed once near the top of `save_nc_batch()` and reused at all five `createVariable()` call sites.
+## F.4 Terrain Derivative Preprocessing Controls
 
-**Validation:** confirmed on the `test_all_files.json` batch (7 scenes: `probav_1/2/3`, `spotvgt1_1/2/3/4`), where `probav_1` (tile X08Y00) and `probav_3` (tile X00Y00) previously failed with the chunk-size error on narrow edge tiles; the fix resolves the crash without altering output data for interior tiles (which already matched the configured chunk size).
+Terrain slope/aspect (used by the terrain-effect uncertainty term) are computed on the DEM **interpolated onto the sensor grid** (`lat`, `lon` of the tile), not the native DEM grid:
 
-**Contractual outputs for FDR4VGT:** for this ATBD, the contractual kernel-facing outputs are the reflectance (`rTOC`, `rTOC_0`), the Jacobians (`Jrtoa`, `Juo3`, `Juh2o`, `Jpre`, `Jtau550`), and the aerosol spread (`UrTOC_ens`). Host-side uncertainty terms (`Duh2o`, `Duo3`, `Drtoa`, `Dpre`, `Dtaup`) are combined with these Jacobians in the uncertainty propagation equation of Section 5. This appendix defines the implementation API used by the operational chain and should be updated if the upstream HYGEOS `smaccl` API changes.
+- `terrain_slope_method`: `Horn` (3x3, **default**) or `Florinsky`, via `xdem.terrain`.
+- `terrain_gaussian_sigma` (**default `0.0`**, disabled): optional Gaussian pre-smoothing of the interpolated DEM before slope/aspect, to reduce high-frequency artefacts over low-relief/quantized-elevation areas.
+- `sensor_spatial_resolution_m` sets the spatial resolution used in the slope computation.
+
+## F.5 DEM No-Data Handling for Terrain Derivatives
+
+Invalid/no-data DEM pixels (ocean, lakes, DEM gaps) are filled with the value of their **nearest valid neighbor** (`_nearest_valid_fill()`, [fdr4vgt/funcs.py](../fdr4vgt/funcs.py), via `scipy.ndimage.distance_transform_edt`) before computing slope/aspect and `Delev`, keeping the filled region locally continuous with the surrounding terrain. The final slope/aspect output preserves the original DEM no-data mask (`slope[~valid] = np.nan`).
+
+## F.6 Terrain Derivative Halo Sizing
+
+When `terrain_gaussian_sigma > 0`, the per-tile lat/lon window used for the terrain slope/aspect computation is widened to `\lceil 4 \times \text{sigma} \rceil + 1` pixels of halo (instead of the 1-pixel halo used elsewhere), sliced directly from the full-scene `lat`/`lon` grid in `_worker_compute_tile()` ([fdr4vgt/process.py](../fdr4vgt/process.py)), then cropped back to the tile's own extent. This ensures the Gaussian kernel has sufficient spatial context at every tile boundary.
+
+## F.7 AOD-Slope Criterion for Quality-Flag Bit 3
+
+In addition to the native-grid gradient criterion (Appendix F.1), Bit 3 also includes an AOD-slope criterion based on `aod_grad_fine` — the gradient magnitude of the AOD already interpolated onto the sensor grid, computed once per scene in `precompute_ancillary()` ([fdr4vgt/process.py](../fdr4vgt/process.py)) via `np.gradient` on the full cached `AOD_550_used` grid. A pixel is flagged when `aod_grad_fine` exceeds a global, scene-adaptive threshold: $\max(\text{median} + k \cdot 1.4826 \cdot \text{MAD},\ \text{quantile}(q))$, computed once from the whole-scene grid. This is OR-ed into Bit 3 in `build_flag()` ([fdr4vgt/funcs.py](../fdr4vgt/funcs.py)), in addition to (not replacing) the Appendix F.1 criterion.
+
+**Configuration knobs** (`[Options]` section):
+
+| Parameter | Meaning | Default |
+|:----------|:--------|:--------|
+| `aod_contour_enable` | Enable the AOD-slope criterion for Bit 3 | **`True`** |
+| `aod_contour_grad_k` | Robust threshold MAD multiplier *k* | **`2.0`** |
+| `aod_contour_grad_quantile` | Robust threshold quantile *q* | **`0.90`** |
+
+: AOD-slope criterion configuration knobs

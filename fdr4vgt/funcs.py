@@ -5,7 +5,7 @@ import xdem.terrain as xdem_terrain
 from core.interpolate import interp, Linear
 from core.tools import xrcrop
 from scipy.interpolate import RegularGridInterpolator
-from scipy.ndimage import maximum_filter, binary_closing
+from scipy.ndimage import maximum_filter, binary_closing, gaussian_filter, distance_transform_edt
 import psutil
 import os
 from time import time
@@ -31,6 +31,28 @@ class config_class:
 
 
 config = config_class()
+
+
+def _nearest_valid_fill(arr, valid):
+    """Fill invalid pixels with the value of their nearest valid neighbor.
+
+    Filling invalid/no-data regions (ocean, lakes, DEM gaps) with a single
+    global constant (e.g. nanmedian) creates an artificial cliff at the
+    boundary of every invalid patch: a flat plateau surrounded by real
+    terrain. Differentiating across that boundary (slope/aspect) then
+    produces spurious high-gradient artefacts that trace the shape of the
+    invalid region -- a single stripe along a roughly linear coastline, or a
+    ring/arc around a blob-shaped island/lake/no-data patch. Nearest-valid
+    fill keeps the filled value locally continuous with the surrounding real
+    data, so no artificial edge is introduced.
+    """
+    if np.all(valid):
+        return arr
+    if not np.any(valid):
+        return np.zeros_like(arr)
+    _, indices = distance_transform_edt(~valid, return_indices=True)
+    return arr[tuple(indices)]
+
 
 def shift_lon_to_360(ds, lon_sat):
     '''
@@ -149,6 +171,42 @@ def build_flag(ds_input, ds_output, config_data):
             guard = guard | (np.isfinite(tau) & (tau >= tau_rel * float(aodmax)))
 
         flag_aot_grad = seed | (expanded & guard)
+
+    # Explicit AOD-slope "contour" criterion: the gradient-based criterion
+    # above uses `aod_grad`, which by default is computed on the coarse
+    # native-MERRA grid (`aod_grad_source=merra_native`) and only loosely
+    # aligns with the actual AOD transition on the fine sensor grid -- a
+    # broad, gradual AOD ramp can have its steepest LOCAL slope well inside or
+    # outside the aodmax boundary, so Bit 3 can miss most of the true
+    # transition zone even with morphology enabled (measured recall of the
+    # true aodmax boundary was only ~11% on a real high-AOD scene). This adds
+    # a SEPARATE criterion based on `aod_grad_fine` -- the gradient of AOD
+    # already interpolated onto the actual sensor grid (Appendix F.7) -- so
+    # the flagged region naturally covers the FULL width of wherever the real
+    # AOD slope is elevated (a gradual transition flags a wide band; a sharp
+    # one flags a narrow band), rather than an arbitrary fixed-width ring.
+    if bool(config_data.__dict__.get('aod_contour_enable', True)) and 'aod_grad_fine' in ds_output:
+        fine_grad = np.asarray(ds_output['aod_grad_fine']).astype(np.float32)
+        thr_fine_global = config_data.__dict__.get('aod_contour_grad_thr_global')
+        if thr_fine_global is not None:
+            thr_fine = float(thr_fine_global)
+        else:
+            # Per-tile fallback (e.g. anc_cache disabled): same recipe as the
+            # global one, computed locally.
+            valid_fine = np.isfinite(fine_grad)
+            if np.any(valid_fine):
+                gf = fine_grad[valid_fine]
+                med_f = np.median(gf)
+                mad_f = np.median(np.abs(gf - med_f))
+                sigma_f = 1.4826 * mad_f
+                k_f = float(config_data.__dict__.get('aod_contour_grad_k', 2.0))
+                q_f = min(max(float(config_data.__dict__.get('aod_contour_grad_quantile', 0.90)), 0.5), 0.999999)
+                qv_f = float(np.quantile(gf, q_f))
+                thr_fine = max(float(med_f + k_f * sigma_f), qv_f)
+            else:
+                thr_fine = np.inf
+        aod_contour = np.isfinite(fine_grad) & (fine_grad > thr_fine)
+        flag_aot_grad = np.asarray(flag_aot_grad) | aod_contour
 
     flag_cloud = ds_input['clm'] != 0 # cloud contaminated flag
 #    flag = ((flag_aot.data.astype(np.int16) << 0) | #lsb
@@ -660,7 +718,14 @@ def calculate_monthly_aerosol(
     # Stack the per-month model indices into (nmonths, y, x).
     return np.stack(mensual_iaer, axis=0)
 
-def _load_or_compute_terrain(latitude, longitude, dsDEM):
+def _load_or_compute_terrain(
+    latitude,
+    longitude,
+    dsDEM,
+    spatial_resolution_m=1000.0,
+    slope_method="Horn",
+    gaussian_sigma=0.0,
+):
     """Load cached terrain data or compute if not available."""
 #    file_name = Path(config.kept_data_path) / "slope" / \
 #                f"{str(latitude.y[0].values)[:10]}_{str(longitude.x[0].values)[:10]}_slope.nc"
@@ -672,10 +737,30 @@ def _load_or_compute_terrain(latitude, longitude, dsDEM):
 #    file_name.parent.mkdir(parents=True, exist_ok=True)
     
     elev = interp(dsDEM["elev"], lat=Linear(latitude), lon=Linear(longitude))
-    slope = xdem_terrain.slope(elev.values, resolution=10)
-    aspect = xdem_terrain.aspect(elev.values)
+    elev_arr = np.asarray(elev.values, dtype=np.float32)
+
+    valid = np.isfinite(elev_arr)
+    elev_fill = _nearest_valid_fill(elev_arr, valid).astype(np.float32)
+
+    sigma = float(gaussian_sigma)
+    if sigma > 0.0:
+        elev_proc = gaussian_filter(elev_fill, sigma=sigma).astype(np.float32)
+    else:
+        elev_proc = elev_fill
+
+    method = str(slope_method)
+    slope = xdem_terrain.slope(
+        elev_proc,
+        resolution=float(spatial_resolution_m),
+        method=method,
+    )
+    aspect = xdem_terrain.aspect(elev_proc, method=method)
     slope = slope.astype(np.float32)
     aspect = aspect.astype(np.float32)
+    # Preserve DEM no-data mask; derivative on filled values can otherwise
+    # create synthetic circular artefacts around invalid regions.
+    slope[~valid] = np.nan
+    aspect[~valid] = np.nan
     
     # Cache results
     terrain_ds = xr.Dataset(
@@ -710,9 +795,7 @@ def compute_delta_elevation_from_elev(
     if not np.any(valid):
         return np.full(elev_arr.shape, np.nan, dtype=np.float32)
 
-    fill_value = np.nanmedian(elev_arr[valid]).astype(np.float32)
-    filled = elev_arr.copy()
-    filled[~valid] = fill_value
+    filled = _nearest_valid_fill(elev_arr, valid).astype(np.float32)
 
     slope_deg = xdem_terrain.slope(filled, resolution=float(spatial_resolution_m)).astype(np.float32)
     slope_tan = np.tan(np.radians(np.clip(slope_deg, 0.0, 89.9))).astype(np.float32)
@@ -805,15 +888,18 @@ def sample_koppen_geiger_multiplier(lat, lon, kg_dataset, zone_to_multiplier, de
     out_flat[target_flat] = sampled
     return out
 
-def _stack_viewing_angles(vnir_angle, swir_angle):
-    return np.stack([vnir_angle, vnir_angle, swir_angle, swir_angle])
+def _stack_viewing_angles(vnir_angle, swir_angle, n_bands):
+    # For 4-band products, SWIR geometry applies to the last band only.
+    n_bands = int(n_bands)
+    n_vnir = max(0, n_bands - 1)
+    return np.stack([vnir_angle] * n_vnir + [swir_angle])
 
 def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
     """
     Calculate error from terrain slope and aspect.
     """
     mtetas = ds.SZA.data.astype(np.float32).ravel()#.compute()
-    mtetav = _stack_viewing_angles(ds.VZA.data,ds.VZA_IR.data).reshape(len(ds.attrs["bands"]), -1)#.compute()
+    mtetav = _stack_viewing_angles(ds.VZA.data, ds.VZA_IR.data, len(ds.attrs["bands"])).reshape(len(ds.attrs["bands"]), -1)#.compute()
     mphis = ds.SAA.data.astype(np.float32).ravel()#.compute()
     maspect = aspect.data.ravel()#.compute()
     mslope = slope.data.ravel()#.compute()
@@ -866,20 +952,55 @@ def slope_err(ds, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer):
     return np.array(slope_errs)
 
 #@memory_tracker
-def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize, dem_ds=None):
+def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize, dem_ds=None,
+                   wide_lat=None, wide_lon=None, crop_offset=None):
     # ``dem_ds`` may be an already-open (lazy) DEM dataset preloaded once to
     # avoid re-opening the file for every tile. Cropping + compute stays
     # per-tile so peak memory remains bounded.
+    #
+    # ``wide_lat``/``wide_lon`` (optional): a WIDER lat/lon window than
+    # ``ds_probav``'s own (typically 1-pixel-halo) grid, used only for the
+    # slope/aspect derivative. This matters when ``terrain_gaussian_sigma`` > 0:
+    # a Gaussian pre-smoothing needs several pixels of spatial context on every
+    # side to be accurate, but the per-tile halo elsewhere in the pipeline is
+    # only 1 pixel. Computing the smoothing on a too-narrow per-tile window
+    # creates a spurious discontinuity at every tile boundary (a periodic
+    # stripe pattern), because each tile's edge is (incorrectly) treated as if
+    # it were the edge of the whole scene. When given, ``crop_offset`` (row,
+    # col) gives the position of ``ds_probav``'s own window inside the wider
+    # array, and the computed slope/aspect are cropped back down to
+    # ``ds_probav``'s extent before use, so the terrain-effect formula still
+    # operates on arrays of the expected (small) tile shape.
     if dem_ds is None:
         dem_ds = xr.open_dataset(config.dem_path, chunks="auto")
-    dsDEM = xrcrop(dem_ds, lat = ds_probav.y).chunk({"lat" : chunksize, "lon" : chunksize})
+
+    lat_for_terrain = wide_lat if wide_lat is not None else ds_probav.lat
+    lon_for_terrain = wide_lon if wide_lon is not None else ds_probav.lon
+    crop_y = ds_probav.y if wide_lat is None else wide_lat.y
+
+    dsDEM = xrcrop(dem_ds, lat = crop_y).chunk({"lat" : chunksize, "lon" : chunksize})
     dsDEM = dsDEM.compute()
-    terrain_data = _load_or_compute_terrain(ds_probav.lat, ds_probav.lon, dsDEM)
+    terrain_data = _load_or_compute_terrain(
+        lat_for_terrain,
+        lon_for_terrain,
+        dsDEM,
+        spatial_resolution_m=float(config.__dict__.get('sensor_spatial_resolution_m', 1000.0)),
+        slope_method=str(config.__dict__.get('terrain_slope_method', 'Horn')),
+        gaussian_sigma=float(config.__dict__.get('terrain_gaussian_sigma', 0.0)),
+    )
+
 
 #    elev = terrain_data["elev"]
 #    delev = terrain_data["delev"]
     slope = terrain_data["slope"]
     aspect = terrain_data["aspect"]
+
+    if crop_offset is not None:
+        oy, ox = crop_offset
+        ny = ds_probav.sizes['y']
+        nx = ds_probav.sizes['x']
+        slope = slope.isel(y=slice(oy, oy + ny), x=slice(ox, ox + nx))
+        aspect = aspect.isel(y=slice(oy, oy + ny), x=slice(ox, ox + nx))
 
     # Also return the local terrain slope (degrees) used to derive the terrain
     # uncertainty term, so callers can save it for debugging (e.g. when the
@@ -887,5 +1008,3 @@ def get_slope_err(ds_probav, TOTEXTTAU, pression, ca_, ca_ind, iaer, chunksize, 
     slope_deg = slope.data.astype(np.float32)
 
     return slope_err(ds_probav, slope, aspect, TOTEXTTAU, pression, ca_, ca_ind, iaer), slope_deg
-
-pass

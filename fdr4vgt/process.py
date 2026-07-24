@@ -32,6 +32,7 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 import psutil
+from scipy.ndimage import median_filter
 
 try:
     import rasterio
@@ -235,11 +236,13 @@ def compute_urtoc(Jtoa, Utoa, Jh2o, Uh2o,Jo3, Uo3, Jps, Ups, Jt550, Ut550, Urtoc
 #@memory_tracker
 def compute_rtm_fit(session, pression, iaermodel, raa, raa_ir, rtoc, sza, tauaer, vza, vza_ir, wvl):
     results = np.zeros(rtoc.shape, dtype=np.float32) + np.nan
+    # In 4-band products, only the last band uses SWIR geometry.
+    n_vnir = max(1, len(wvl) - 1)
     for i, w in enumerate(wvl):
         filtre = ~np.isnan(pression.values)
         pre = pression.values[filtre].ravel()
         iaer = iaermodel.values[filtre].ravel()
-        if i < 2:
+        if i < n_vnir:
             phi = raa[filtre].ravel()
             thetav = vza[filtre].ravel()
         else:
@@ -258,6 +261,16 @@ def compute_rtm_fit(session, pression, iaermodel, raa, raa_ir, rtoc, sza, tauaer
 #@memory_tracker
 def run(S, data_batch, iaero):
     return S.run(data_batch, iaero)
+
+
+def smooth_aerosol_indices(indices, window):
+    """Optionally smooth categorical aerosol-model indices with median filter."""
+    w = int(window)
+    if w <= 1:
+        return indices
+    if (w % 2) == 0:
+        w += 1
+    return median_filter(indices, size=w, mode='nearest').astype(indices.dtype)
 
 # Read-only state shared with worker processes via fork (populated before the pool
 # is created, so children inherit it copy-on-write without pickling).
@@ -341,6 +354,7 @@ def _worker_compute_tile(task):
     # from local disk instead of re-interpolating and re-reading the network.
     # Fallback to per-tile interpolation when the cache is disabled.
     aod_grad_native = None
+    aod_grad_fine = None
     if anc_store is not None:
         anc = g.get('anc_ds')
         if anc is None:
@@ -351,6 +365,8 @@ def _worker_compute_tile(task):
             data_batch[p] = (('y', 'x'), anc_tile[p].values)
         if 'AOD_GRAD_NATIVE' in anc_tile.variables:
             aod_grad_native = anc_tile['AOD_GRAD_NATIVE'].values
+        if 'AOD_GRAD_FINE' in anc_tile.variables:
+            aod_grad_fine = anc_tile['AOD_GRAD_FINE'].values
         iaer_best = anc_tile['iaer_best'].values
         iaer_month = anc_tile['iaer_month'].values
     else:
@@ -360,12 +376,46 @@ def _worker_compute_tile(task):
             data_batch[p] = merra_tile[p].where(~filtre_tile, other=np.nan)
         iaer_best = get_iaer(data_batch)
         iaer_month = calculate_monthly_aerosol(date_time, latitude, longitude, datasets=monthly_datasets)
+
+    iaer_filter_window = int(config_.get('aerosol_model_filter_window', 1))
+    if iaer_filter_window > 1:
+        iaer_best = smooth_aerosol_indices(iaer_best, iaer_filter_window)
+        for m in range(iaer_month.shape[0]):
+            iaer_month[m] = smooth_aerosol_indices(iaer_month[m], iaer_filter_window)
     _now = time(); _PHASE_T['1_ancillary_read'] += _now - _tp; _tp = _now
     iaero = np.zeros((config_['nmodels']+1, iaer_best.shape[0], iaer_best.shape[1]), dtype=np.int32)
     iaero[0] = iaer_best
     iaero[1:] = iaer_month
     pression = data_batch['SLP'] * config_['k_p0']
-    slope_err, slope_deg = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaero[1], chunksize=batch_size, dem_ds=dem_ds)
+
+    # The Gaussian pre-smoothing of the DEM (`terrain_gaussian_sigma`, applied
+    # inside get_slope_err/_load_or_compute_terrain) needs several pixels of
+    # spatial context on every side. The rest of this tile's data (`data_batch`)
+    # only has a 1-pixel halo, which is enough for the plain 3x3 Horn/Florinsky
+    # derivative but NOT for a sigma>0 Gaussian filter: computed on a too-narrow
+    # per-tile window, each tile treats its own edge as if it were the edge of
+    # the whole scene, producing a spurious discontinuity at every tile
+    # boundary (a periodic stripe pattern repeating every `chunks_size`
+    # pixels). Fix: slice a WIDER lat/lon window directly from the full-scene
+    # `data` (lat/lon are small, already-realized 2D arrays, cheap to slice at
+    # any halo size) sized to the configured sigma, compute terrain on that,
+    # then crop back to `data_batch`'s own extent before the terrain-effect
+    # formula (slope_err) is applied.
+    _terrain_sigma = float(config_.get('terrain_gaussian_sigma', 0.0))
+    _terrain_halo = max(1, int(np.ceil(4.0 * _terrain_sigma)) + 1) if _terrain_sigma > 0 else 1
+    if _terrain_halo > 1:
+        ty_min = max(0, i - _terrain_halo)
+        ty_max = min(s1, i + batch_size + _terrain_halo)
+        tx_min = max(0, j - _terrain_halo)
+        tx_max = min(s2, j + batch_size + _terrain_halo)
+        wide_lat = data['lat'].isel(y=slice(ty_min, ty_max), x=slice(tx_min, tx_max))
+        wide_lon = data['lon'].isel(y=slice(ty_min, ty_max), x=slice(tx_min, tx_max))
+        crop_offset = (y_min - ty_min, x_min - tx_min)
+    else:
+        wide_lat = wide_lon = crop_offset = None
+
+    slope_err, slope_deg = get_slope_err(data_batch, data_batch['TOTEXTTAU'].values, pression.values, ca_, ca_ind, iaero[1], chunksize=batch_size, dem_ds=dem_ds,
+                                          wide_lat=wide_lat, wide_lon=wide_lon, crop_offset=crop_offset)
     slope_err = np.maximum(slope_err, -2)
     slope_err = np.minimum(slope_err, 2)
     _now = time(); _PHASE_T['2_slope_err'] += _now - _tp; _tp = _now
@@ -409,6 +459,14 @@ def _worker_compute_tile(task):
         del ygrad
         del xgrad
     ds_out = ds_out.assign({'aod_grad': (('y','x'), aod_grad)})
+
+    # Fine sensor-grid AOD gradient (Appendix F.7), used by the "contour"
+    # criterion for Bit 3: unlike `aod_grad` above (native-MERRA-grid based,
+    # for gradient-halo detection, Appendix F.1), this is the gradient of the
+    # AOD already interpolated onto the actual sensor grid, so its magnitude
+    # directly reflects the true local AOD slope at 1-pixel resolution.
+    if aod_grad_fine is not None:
+        ds_out = ds_out.assign({'aod_grad_fine': (('y','x'), aod_grad_fine[y_min_2:y_max_2, x_min:x_max])})
 
     urtoc_rtm_slope = np.abs(ds_out['rTOC'].data * (slope_err - 1))
     ds_out['slope_err'] = (('bands','y', 'x'), slope_err)
@@ -602,6 +660,26 @@ def precompute_ancillary(data, config_, merra_globals, monthly_datasets,
             done += 1
     print("[precompute_ancillary] {}/{} tiles -> {} in {:.1f}s".format(
         done, ntiles, store, time() - t0), flush=True)
+
+    # AOD "contour" gradient: computed ONCE on the FULL cached TOTEXTTAU array
+    # (the AOD already interpolated onto the actual sensor grid), not the
+    # coarse native-MERRA-grid gradient (AOD_GRAD_NATIVE) used for the
+    # gradient-halo criterion (Appendix F.1). A per-tile computation would
+    # need a multi-pixel halo and would otherwise reintroduce a tile-boundary
+    # discontinuity (as previously found for `terrain_gaussian_sigma`), so this
+    # is done once on the complete scene, exactly like AOD_GRAD_NATIVE's
+    # global robust threshold below.
+    tau_full = xa.open_zarr(store, consolidated=False)['TOTEXTTAU'].values.astype(np.float32)
+    tau_valid = np.isfinite(tau_full)
+    if np.any(tau_valid):
+        tau_fill = np.where(tau_valid, tau_full, np.float32(np.nanmedian(tau_full[tau_valid])))
+        dy, dx = np.gradient(tau_fill)
+        aod_grad_fine = np.sqrt(dy ** 2 + dx ** 2).astype(np.float32)
+        aod_grad_fine[~tau_valid] = np.nan
+        xa.Dataset({'AOD_GRAD_FINE': (('y', 'x'), aod_grad_fine)}).to_zarr(
+            store, mode='a', consolidated=False)
+    del tau_full
+
     return tmpdir, store
 
 
@@ -708,6 +786,30 @@ def process_batched(data, frac_aer_model, ca_, ca_ind, config_, batch_size=512, 
                   "(med={:.4g} sigma={:.4g} q{:.1f}={:.4g})".format(
                       thr_global, med, sigma, 100 * q, qv), flush=True)
         del grad_full
+
+    # Global threshold for the AOD "contour" criterion (fine sensor-grid AOD
+    # gradient, Appendix F.7): flags the FULL width of wherever the local AOD
+    # slope is elevated -- rather than a fixed-width ring around the aodmax
+    # crossing -- so gradual transitions are covered over their whole extent
+    # while sharp transitions stay narrow. Computed once from the whole-scene
+    # AOD_GRAD_FINE grid for the same self-masking reasons as above.
+    if anc_store is not None and bool(config_.get('aod_contour_enable', True)):
+        grad_fine_full = xa.open_zarr(anc_store, consolidated=False)['AOD_GRAD_FINE'].values
+        gfvalid = np.isfinite(grad_fine_full)
+        if np.any(gfvalid):
+            gf = grad_fine_full[gfvalid].astype(np.float32)
+            med_f = np.median(gf)
+            mad_f = np.median(np.abs(gf - med_f))
+            sigma_f = 1.4826 * mad_f
+            k_f = float(config_.get('aod_contour_grad_k', 2.0))
+            q_f = min(max(float(config_.get('aod_contour_grad_quantile', 0.90)), 0.5), 0.999999)
+            qv_f = float(np.quantile(gf, q_f))
+            thr_fine_global = max(float(med_f + k_f * sigma_f), qv_f)
+            config.set('aod_contour_grad_thr_global', thr_fine_global)
+            print("[process_batched] global aod_contour gradient threshold = {:.5g} "
+                  "(med={:.4g} sigma={:.4g} q{:.1f}={:.4g})".format(
+                      thr_fine_global, med_f, sigma_f, 100 * q_f, qv_f), flush=True)
+        del grad_fine_full
 
     _SHARED.update(dict(
         data=data, batch_size=batch_size, config_=config_, ca_=ca_, ca_ind=ca_ind,
@@ -874,6 +976,13 @@ def process(configfile):
     config_.setdefault('aod_grad_morph_closing_radius_px', 0)
     config_.setdefault('aod_grad_morph_guard_rel', 0.5)
     config_.setdefault('aod_grad_morph_aod_rel', 0.8)
+    config_.setdefault('aod_contour_enable', True)
+    config_.setdefault('aod_contour_grad_k', 2.0)
+    config_.setdefault('aod_contour_grad_quantile', 0.90)
+    config_.setdefault('sensor_spatial_resolution_m', 1000)
+    config_.setdefault('terrain_slope_method', 'Horn')
+    config_.setdefault('terrain_gaussian_sigma', 0.0)
+    config_.setdefault('aerosol_model_filter_window', 1)
     # SMACCL still expects taot for its internal high-AOD process flag.
     config_['taot'] = float(config_['aodmax'])
     config.set('amip_path', config_['amip_path'])
@@ -898,11 +1007,17 @@ def process(configfile):
     config.set('aod_grad_morph_closing_radius_px', config_['aod_grad_morph_closing_radius_px'])
     config.set('aod_grad_morph_guard_rel', config_['aod_grad_morph_guard_rel'])
     config.set('aod_grad_morph_aod_rel', config_['aod_grad_morph_aod_rel'])
+    config.set('aod_contour_enable', config_['aod_contour_enable'])
+    config.set('aod_contour_grad_k', config_['aod_contour_grad_k'])
+    config.set('aod_contour_grad_quantile', config_['aod_contour_grad_quantile'])
+    config.set('sensor_spatial_resolution_m', config_['sensor_spatial_resolution_m'])
+    config.set('terrain_slope_method', config_['terrain_slope_method'])
+    config.set('terrain_gaussian_sigma', config_['terrain_gaussian_sigma'])
+    config.set('aerosol_model_filter_window', config_['aerosol_model_filter_window'])
 
     # Optional uncertainty switches / parameters.
     config_.setdefault('enable_brdf_uncertainty', True)
     config_.setdefault('enable_koppen_geiger_aod_multiplier', True)
-    config_.setdefault('sensor_spatial_resolution_m', 1000)
     config_.setdefault('terrain_geolocation_error_pixels', 0.5)
     config_.setdefault('terrain_slope_window', 3)
 
